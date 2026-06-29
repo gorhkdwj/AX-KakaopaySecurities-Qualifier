@@ -1,8 +1,8 @@
 """CLI, bundle-preflight, sanitizer, row-parser, bucket, and metric tests for OpenBell Guard.
 
-P4-09 keeps the shared command-line entry point and adds basic M-001 through
-M-007 bucket metric calculation for sanitized logs and metrics. The script still
-must not create the final analysis outputs.
+P4-10 keeps the shared command-line entry point and adds M-001 through M-013
+bucket, observability-lag, and comparison metric calculation for sanitized logs
+and metrics. The script still must not create the final analysis outputs.
 """
 
 from __future__ import annotations
@@ -196,8 +196,8 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertTrue(summary_path.exists())
 
             payload = json.loads(summary_path.read_text(encoding="utf-8"))
-            self.assertEqual("P4-09", payload["stage"])
-            self.assertEqual("basic_metrics_calculated_ready", payload["run_status"])
+            self.assertEqual("P4-10", payload["stage"])
+            self.assertEqual("observability_and_comparison_metrics_calculated_ready", payload["run_status"])
             self.assertFalse(payload["bundle"]["raw_telemetry_records_parsed"])
             self.assertTrue(payload["bundle"]["sanitized_telemetry_records_parsed"])
             self.assertFalse(payload["bundle"]["raw_excerpts_emitted"])
@@ -220,10 +220,25 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertEqual(3, payload["buckets"]["bucket_count"])
             self.assertEqual(["service_path", "bucket_start_utc"], payload["buckets"]["sort_order"])
             self.assertEqual(
-                ["M-001", "M-002", "M-003", "M-004", "M-005", "M-006", "M-007"],
+                [
+                    "M-001",
+                    "M-002",
+                    "M-003",
+                    "M-004",
+                    "M-005",
+                    "M-006",
+                    "M-007",
+                    "M-008",
+                    "M-009",
+                    "M-010",
+                    "M-011",
+                    "M-012",
+                    "M-013",
+                ],
                 payload["metrics"]["calculated_m_ids"],
             )
             self.assertEqual(3, payload["metrics"]["bucket_count"])
+            self.assertGreaterEqual(payload["metrics"]["comparison_metric_count"], 1)
 
             serialized = json.dumps(payload, ensure_ascii=False)
             self.assertNotIn(str(FIXTURE_BUNDLE), serialized)
@@ -398,7 +413,7 @@ class SanitizationTest(unittest.TestCase):
             self.assertEqual(original_logs, (bundle_path / "logs.jsonl").read_text(encoding="utf-8"))
 
             summary = json.loads((output_path / "openbell-cli-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-09", summary["stage"])
+            self.assertEqual("P4-10", summary["stage"])
             self.assertTrue(summary["outputs"]["sanitization_report_created"])
             self.assertFalse(summary["outputs"]["analysis_json_created"])
             self.assertEqual(7, summary["sanitization"]["total_redactions"])
@@ -603,7 +618,7 @@ class BucketSummaryTest(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             bucket_summary = json.loads((output_path / "bucket-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-09", bucket_summary["stage"])
+            self.assertEqual("P4-10", bucket_summary["stage"])
             self.assertEqual("UTC", bucket_summary["time_basis"])
             self.assertEqual("Asia/Seoul", bucket_summary["display_timezone"])
             self.assertEqual(["service_path", "bucket_start_utc"], bucket_summary["sort_order"])
@@ -669,8 +684,26 @@ class BasicMetricSummaryTest(unittest.TestCase):
             metric_summary = json.loads((output_path / "metric-summary.json").read_text(encoding="utf-8"))
             expected_analysis = json.loads(EXPECTED_ANALYSIS.read_text(encoding="utf-8"))
 
-            self.assertEqual("P4-09", metric_summary["stage"])
+            self.assertEqual("P4-10", metric_summary["stage"])
             self.assertEqual("logs.jsonl", metric_summary["primary_telemetry"])
+            self.assertEqual(
+                [
+                    "M-001",
+                    "M-002",
+                    "M-003",
+                    "M-004",
+                    "M-005",
+                    "M-006",
+                    "M-007",
+                    "M-008",
+                    "M-009",
+                    "M-010",
+                    "M-011",
+                    "M-012",
+                    "M-013",
+                ],
+                metric_summary["calculated_m_ids"],
+            )
             self.assertEqual(["service_path", "bucket_start_utc"], metric_summary["sort_order"])
             self.assertEqual(3, metric_summary["bucket_count"])
             self.assertFalse(metric_summary["raw_excerpts_emitted"])
@@ -692,6 +725,84 @@ class BasicMetricSummaryTest(unittest.TestCase):
                 self.assertEqual("logs.jsonl", actual_bucket["source_for_m001_m007"])
                 for metric_name, expected_metric in expected_bucket["metrics"].items():
                     self.assertEqual(expected_metric, actual_bucket["metrics"][metric_name])
+
+            baseline_bucket = actual_by_key[("market_data", "2026-06-29T23:58:00+00:00")]
+            incident_bucket = actual_by_key[("market_data", "2026-06-30T00:00:00+00:00")]
+            self.assertEqual("logs.jsonl", baseline_bucket["source_for_m008_m009"])
+            self.assertEqual(
+                {
+                    "m_id": "M-008",
+                    "value": None,
+                    "unit": "ms",
+                    "sample_count": 2,
+                    "source": "logs.jsonl",
+                    "individual_values_emitted": False,
+                },
+                baseline_bucket["metrics"]["ingestion_lag_ms"],
+            )
+            self.assertEqual(
+                {"m_id": "M-009", "value": 1000, "unit": "ms", "sample_count": 2},
+                baseline_bucket["metrics"]["ingestion_lag_p50_ms"],
+            )
+            self.assertEqual(
+                {
+                    "m_id": "M-009",
+                    "value": None,
+                    "unit": "ms",
+                    "sample_count": 2,
+                    "reason_code": "insufficient_sample",
+                },
+                baseline_bucket["metrics"]["ingestion_lag_p95_ms"],
+            )
+            self.assertEqual(
+                {"m_id": "M-009", "value": 1000, "unit": "ms", "sample_count": 3},
+                incident_bucket["metrics"]["ingestion_lag_p50_ms"],
+            )
+
+            comparisons = {
+                (comparison["service_path"], comparison["metric_name"]): comparison
+                for comparison in metric_summary["comparison_metrics"]
+            }
+            self.assertEqual(len(comparisons), metric_summary["comparison_metric_count"])
+            self.assertEqual(
+                {
+                    "m_id": "M-010",
+                    "value": 80,
+                    "unit": "ms",
+                    "sample_count": 1,
+                },
+                comparisons[("market_data", "latency_p50_ms")]["metrics"]["baseline_median"],
+            )
+            self.assertEqual(
+                {
+                    "m_id": "M-011",
+                    "value": 160,
+                    "unit": "ms",
+                    "sample_count": 2,
+                },
+                comparisons[("market_data", "latency_p50_ms")]["metrics"]["incident_peak"],
+            )
+            self.assertEqual(
+                {"m_id": "M-012", "value": 80, "unit": "ms"},
+                comparisons[("market_data", "latency_p50_ms")]["metrics"]["change_abs"],
+            )
+            self.assertEqual(
+                {"m_id": "M-013", "value": 100.0, "unit": "percent"},
+                comparisons[("market_data", "latency_p50_ms")]["metrics"]["change_pct"],
+            )
+            self.assertEqual(
+                {
+                    "m_id": "M-013",
+                    "value": None,
+                    "unit": "percent",
+                    "reason_code": "zero_denominator",
+                },
+                comparisons[("market_data", "error_count")]["metrics"]["change_pct"],
+            )
+            self.assertEqual(
+                {"m_id": "M-012", "value": 0, "unit": "ms"},
+                comparisons[("market_data", "ingestion_lag_p50_ms")]["metrics"]["change_abs"],
+            )
 
     def test_metrics_only_source_calculates_counts_error_rate_and_nearest_rank(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -831,6 +942,152 @@ class BasicMetricSummaryTest(unittest.TestCase):
             self.assertEqual(
                 {"m_id": "M-005", "value": 123, "unit": "ms", "sample_count": 1},
                 bucket["metrics"]["latency_p50_ms"],
+            )
+
+    def test_metrics_only_ingestion_lag_samples_and_baseline_comparison(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            output_path = Path(temp_dir) / "out"
+            bundle_path.mkdir()
+            write_valid_incident(bundle_path)
+            write_metrics(
+                bundle_path,
+                [
+                    {
+                        "timestamp": "2026-06-30T08:58:01+09:00",
+                        "service_name": "quote-api",
+                        "service_path": "market_data",
+                        "dependency_type": "observability",
+                        "metric_name": "ingestion_lag_sample_ms",
+                        "value": "100",
+                        "unit": "ms",
+                    },
+                    {
+                        "timestamp": "2026-06-30T08:58:02+09:00",
+                        "service_name": "quote-api",
+                        "service_path": "market_data",
+                        "dependency_type": "observability",
+                        "metric_name": "ingestion_lag_sample_ms",
+                        "value": "300",
+                        "unit": "ms",
+                    },
+                    {
+                        "timestamp": "2026-06-30T09:00:01+09:00",
+                        "service_name": "quote-api",
+                        "service_path": "market_data",
+                        "dependency_type": "observability",
+                        "metric_name": "ingestion_lag_sample_ms",
+                        "value": "500",
+                        "unit": "ms",
+                    },
+                    {
+                        "timestamp": "2026-06-30T09:01:01+09:00",
+                        "service_name": "quote-api",
+                        "service_path": "market_data",
+                        "dependency_type": "observability",
+                        "metric_name": "ingestion_lag_sample_ms",
+                        "value": "700",
+                        "unit": "ms",
+                    },
+                ],
+            )
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(output_path))
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            metric_summary = json.loads((output_path / "metric-summary.json").read_text(encoding="utf-8"))
+            self.assertEqual("metrics.csv", metric_summary["primary_telemetry"])
+
+            buckets = {
+                (bucket["service_path"], bucket["bucket_start_utc"]): bucket
+                for bucket in metric_summary["bucket_metrics"]
+            }
+            baseline_bucket = buckets[("market_data", "2026-06-29T23:58:00+00:00")]
+            self.assertEqual("metrics.csv", baseline_bucket["source_for_m008_m009"])
+            self.assertEqual(
+                {
+                    "m_id": "M-008",
+                    "value": None,
+                    "unit": "ms",
+                    "sample_count": 2,
+                    "source": "metrics.csv",
+                    "individual_values_emitted": False,
+                },
+                baseline_bucket["metrics"]["ingestion_lag_ms"],
+            )
+            self.assertEqual(
+                {"m_id": "M-009", "value": 100, "unit": "ms", "sample_count": 2},
+                baseline_bucket["metrics"]["ingestion_lag_p50_ms"],
+            )
+
+            comparisons = {
+                (comparison["service_path"], comparison["metric_name"]): comparison
+                for comparison in metric_summary["comparison_metrics"]
+            }
+            lag_comparison = comparisons[("market_data", "ingestion_lag_p50_ms")]
+            self.assertEqual(
+                {
+                    "m_id": "M-010",
+                    "value": 100,
+                    "unit": "ms",
+                    "sample_count": 1,
+                },
+                lag_comparison["metrics"]["baseline_median"],
+            )
+            self.assertEqual(
+                {
+                    "m_id": "M-011",
+                    "value": 700,
+                    "unit": "ms",
+                    "sample_count": 2,
+                },
+                lag_comparison["metrics"]["incident_peak"],
+            )
+            self.assertEqual({"m_id": "M-012", "value": 600, "unit": "ms"}, lag_comparison["metrics"]["change_abs"])
+            self.assertEqual(
+                {"m_id": "M-013", "value": 600.0, "unit": "percent"},
+                lag_comparison["metrics"]["change_pct"],
+            )
+
+    def test_log_ingestion_lag_marks_missing_observed_time_without_leaking_message(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            output_path = Path(temp_dir) / "out"
+            bundle_path.mkdir()
+            write_valid_incident(bundle_path)
+            row = valid_log_row(message="DO_NOT_LEAK_MISSING_OBSERVED_TIME")
+            row.pop("observed_time")
+            write_logs(bundle_path, [row])
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(output_path))
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            metric_summary_text = (output_path / "metric-summary.json").read_text(encoding="utf-8")
+            self.assertNotIn("DO_NOT_LEAK_MISSING_OBSERVED_TIME", metric_summary_text)
+            metric_summary = json.loads(metric_summary_text)
+            bucket = metric_summary["bucket_metrics"][0]
+            self.assertEqual(
+                {
+                    "m_id": "M-008",
+                    "value": None,
+                    "unit": "ms",
+                    "sample_count": 0,
+                    "source": "logs.jsonl",
+                    "individual_values_emitted": False,
+                    "missing_input_count": 1,
+                    "reason_code": "missing_input",
+                },
+                bucket["metrics"]["ingestion_lag_ms"],
+            )
+            self.assertEqual(
+                {
+                    "m_id": "M-009",
+                    "value": None,
+                    "unit": "ms",
+                    "sample_count": 0,
+                    "reason_code": "insufficient_sample",
+                },
+                bucket["metrics"]["ingestion_lag_p50_ms"],
             )
 
 

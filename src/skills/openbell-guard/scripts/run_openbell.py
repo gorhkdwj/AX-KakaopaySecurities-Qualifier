@@ -1,8 +1,8 @@
 """OpenBell Guard command-line entry point.
 
-P4-09 implements the shared CLI, bundle preflight gate, sanitizer,
-line-oriented telemetry parser, 60-second bucket preparation, and the first
-basic metric calculation slice:
+P4-10 implements the shared CLI, bundle preflight gate, sanitizer,
+line-oriented telemetry parser, 60-second bucket preparation, basic bucket
+metrics, observability lag metrics, and baseline-vs-incident comparisons:
 
 - parse ``--bundle`` and ``--output``;
 - verify that the bundle is an existing, non-symlink directory;
@@ -15,6 +15,10 @@ basic metric calculation slice:
 - assign accepted in-window rows to UTC 60-second service-path buckets.
 - calculate M-001 through M-007 request, error, throughput, error-rate, and
   latency percentile metrics into ``metric-summary.json``.
+- calculate M-008 through M-009 ingestion-lag metrics without emitting raw
+  per-record values.
+- calculate M-010 through M-013 baseline median, incident peak, absolute
+  change, and percent change for comparable bucket metrics.
 
 It still does not create the final ``analysis.json``. That behavior belongs to
 later Phase 4 steps and must keep using this entry point.
@@ -44,7 +48,7 @@ EXIT_CODES = {
     "output_validation_error": 5,
 }
 
-CLI_STAGE = "P4-09"
+CLI_STAGE = "P4-10"
 SUMMARY_FILENAME = "openbell-cli-summary.json"
 SANITIZED_BUNDLE_DIR = "sanitized-bundle"
 SANITIZATION_REPORT = "sanitization-report.md"
@@ -54,6 +58,21 @@ METRIC_SUMMARY_FILENAME = "metric-summary.json"
 SCHEMA_VERSION = "1.0"
 CONTRACT_VERSION = "1.0.0"
 BASIC_METRIC_IDS = ("M-001", "M-002", "M-003", "M-004", "M-005", "M-006", "M-007")
+OBSERVABILITY_METRIC_IDS = ("M-008", "M-009")
+COMPARISON_METRIC_IDS = ("M-010", "M-011", "M-012", "M-013")
+CALCULATED_METRIC_IDS = BASIC_METRIC_IDS + OBSERVABILITY_METRIC_IDS + COMPARISON_METRIC_IDS
+COMPARABLE_BUCKET_METRICS = (
+    "request_count",
+    "error_count",
+    "throughput_rps",
+    "error_rate_pct",
+    "latency_p50_ms",
+    "latency_p95_ms",
+    "latency_p99_ms",
+    "ingestion_lag_p50_ms",
+    "ingestion_lag_p95_ms",
+    "ingestion_lag_p99_ms",
+)
 ERROR_STATUSES = frozenset({"error", "timeout", "rejected"})
 DECIMAL_3_PLACES = Decimal("0.001")
 
@@ -175,10 +194,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="run_openbell.py",
         description=(
-            "Prepare an OpenBell Guard run directory. P4-09 validates the CLI, "
+            "Prepare an OpenBell Guard run directory. P4-10 validates the CLI, "
             "paths, bundle file contract, byte limits, incident metadata, and "
             "creates a masked working copy, telemetry record summary, bucket summary, "
-            "and basic M-001 through M-007 metric summary."
+            "basic metric summary, observability lag metrics, and baseline comparisons."
         ),
     )
     parser.add_argument(
@@ -1021,6 +1040,155 @@ def nearest_rank_value(samples: list[float], percentile: Decimal, minimum_sample
     return rounded_observation(sorted_samples[rank - 1]), None
 
 
+def median_value(samples: list[int | float]) -> int | float | None:
+    if not samples:
+        return None
+    sorted_samples = sorted(decimal_from_number(sample) for sample in samples)
+    middle = len(sorted_samples) // 2
+    if len(sorted_samples) % 2 == 1:
+        return rounded_observation(sorted_samples[middle])
+    return rounded_observation((sorted_samples[middle - 1] + sorted_samples[middle]) / Decimal(2))
+
+
+def ingestion_lag_metric(
+    *,
+    sample_count: int,
+    missing_input_count: int,
+    invalid_optional_field_count: int,
+    source: str,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "m_id": "M-008",
+        "value": None,
+        "unit": "ms",
+        "sample_count": sample_count,
+        "source": source,
+        "individual_values_emitted": False,
+    }
+    if missing_input_count:
+        payload["missing_input_count"] = missing_input_count
+    if invalid_optional_field_count:
+        payload["invalid_optional_field_count"] = invalid_optional_field_count
+    if sample_count == 0:
+        if invalid_optional_field_count and not missing_input_count:
+            payload["reason_code"] = "invalid_optional_field"
+        elif missing_input_count and not invalid_optional_field_count:
+            payload["reason_code"] = "missing_input"
+        elif missing_input_count or invalid_optional_field_count:
+            payload["reason_code"] = "missing_or_invalid_input"
+        else:
+            payload["reason_code"] = "insufficient_sample"
+    return payload
+
+
+def comparison_metric_value(
+    *,
+    m_id: str,
+    value: int | float | None,
+    unit: str,
+    sample_count: int | None = None,
+    reason_code: str | None = None,
+) -> dict[str, Any]:
+    return metric_value(
+        m_id=m_id,
+        value=value,
+        unit=unit,
+        sample_count=sample_count,
+        reason_code=reason_code,
+    )
+
+
+def build_comparison_metrics(bucket_metrics: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    metric_units: dict[tuple[str, str], str] = {}
+    metric_m_ids: dict[tuple[str, str], str] = {}
+
+    for bucket in bucket_metrics:
+        window_type = bucket["window_type"]
+        if window_type not in {"baseline", "incident"}:
+            continue
+        service_path = str(bucket["service_path"])
+        metrics = bucket["metrics"]
+        for metric_name in COMPARABLE_BUCKET_METRICS:
+            metric = metrics.get(metric_name)
+            if not isinstance(metric, dict):
+                continue
+            value = metric.get("value")
+            if not is_finite_number(value):
+                continue
+            unit = str(metric["unit"])
+            key = (service_path, metric_name)
+            if key not in grouped:
+                grouped[key] = {"baseline": [], "incident": []}
+                metric_units[key] = unit
+                metric_m_ids[key] = str(metric["m_id"])
+            grouped[key][window_type].append(float(value))
+
+    comparison_metrics: list[dict[str, Any]] = []
+    for key in sorted(grouped):
+        service_path, metric_name = key
+        baseline_values = grouped[key]["baseline"]
+        incident_values = grouped[key]["incident"]
+        unit = metric_units[key]
+
+        baseline_median = median_value(baseline_values)
+        baseline_reason = None if baseline_median is not None else "insufficient_sample"
+        incident_peak = rounded_observation(max(incident_values)) if incident_values else None
+
+        if baseline_median is None or incident_peak is None:
+            change_abs: int | float | None = None
+            change_pct: int | float | None = None
+            change_pct_reason = "insufficient_sample"
+        else:
+            baseline_decimal = decimal_from_number(baseline_median)
+            incident_decimal = decimal_from_number(incident_peak)
+            change_abs = rounded_observation(incident_decimal - baseline_decimal)
+            if baseline_decimal == 0:
+                change_pct = None
+                change_pct_reason = "zero_denominator"
+            else:
+                change_pct = rounded_float((incident_decimal - baseline_decimal) / baseline_decimal * Decimal(100))
+                change_pct_reason = None
+
+        comparison_metrics.append(
+            {
+                "service_path": service_path,
+                "metric_name": metric_name,
+                "source_metric_m_id": metric_m_ids[key],
+                "unit": unit,
+                "metrics": {
+                    "baseline_median": comparison_metric_value(
+                        m_id="M-010",
+                        value=baseline_median,
+                        unit=unit,
+                        sample_count=len(baseline_values),
+                        reason_code=baseline_reason,
+                    ),
+                    "incident_peak": comparison_metric_value(
+                        m_id="M-011",
+                        value=incident_peak,
+                        unit=unit,
+                        sample_count=len(incident_values),
+                        reason_code="insufficient_sample" if incident_peak is None else None,
+                    ),
+                    "change_abs": comparison_metric_value(
+                        m_id="M-012",
+                        value=change_abs,
+                        unit=unit,
+                    ),
+                    "change_pct": comparison_metric_value(
+                        m_id="M-013",
+                        value=change_pct,
+                        unit="percent",
+                        reason_code=change_pct_reason,
+                    ),
+                },
+            }
+        )
+
+    return comparison_metrics
+
+
 def parse_logs_jsonl(text: str, incident_summary: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     counts = empty_record_counts()
     issues: list[dict[str, Any]] = []
@@ -1151,6 +1319,7 @@ def parse_logs_jsonl(text: str, incident_summary: dict[str, Any]) -> tuple[dict[
         service_path = payload["service_path"]
         status = payload["status"]
         parsed_observed_time: datetime | None = None
+        observed_time_status = "missing"
         latency_value: float | None = None
         dependency_type_value: str | None = None
 
@@ -1170,6 +1339,7 @@ def parse_logs_jsonl(text: str, incident_summary: dict[str, Any]) -> tuple[dict[
             parsed_observed_time = parse_row_datetime(observed_time)
             if parsed_observed_time is None or parsed_observed_time < event_time:
                 parsed_observed_time = None
+                observed_time_status = "invalid_optional_field"
                 counts["field_dropped_count"] += 1
                 issues.append(
                     record_issue(
@@ -1181,6 +1351,8 @@ def parse_logs_jsonl(text: str, incident_summary: dict[str, Any]) -> tuple[dict[
                         severity="degraded",
                     )
                 )
+            else:
+                observed_time_status = "valid"
 
         latency_ms = payload.get("latency_ms")
         if latency_ms is not None:
@@ -1271,6 +1443,7 @@ def parse_logs_jsonl(text: str, incident_summary: dict[str, Any]) -> tuple[dict[
                     "source_location": location,
                     "event_time": event_time,
                     "observed_time": parsed_observed_time,
+                    "observed_time_status": observed_time_status,
                     "service_name": service_name,
                     "service_path": service_path,
                     "dependency_type": dependency_type_value,
@@ -1751,9 +1924,13 @@ def build_metric_summary(
                 "bucket_start_utc": bucket_start_utc,
                 "bucket_start_local": isoformat_local(bucket_start, timezone_name),
                 "source_for_m001_m007": source_name,
+                "source_for_m008_m009": source_name,
                 "request_count": 0,
                 "error_count": 0,
                 "latency_samples": [],
+                "ingestion_lag_samples": [],
+                "ingestion_lag_missing_input_count": 0,
+                "ingestion_lag_invalid_optional_field_count": 0,
                 "source_locations": [],
             }
         group = groups[key]
@@ -1767,6 +1944,17 @@ def build_metric_summary(
                 group["error_count"] += 1
             if record["latency_ms"] is not None:
                 group["latency_samples"].append(float(record["latency_ms"]))
+            if record["observed_time"] is not None:
+                assert isinstance(record["observed_time"], datetime)
+                event_time = record["event_time"]
+                assert isinstance(event_time, datetime)
+                group["ingestion_lag_samples"].append(
+                    (record["observed_time"] - event_time).total_seconds() * 1000
+                )
+            elif record.get("observed_time_status") == "invalid_optional_field":
+                group["ingestion_lag_invalid_optional_field_count"] += 1
+            else:
+                group["ingestion_lag_missing_input_count"] += 1
         else:
             metric_name = record["metric_name"]
             value = float(record["value"])
@@ -1776,6 +1964,8 @@ def build_metric_summary(
                 group["error_count"] += int(value)
             elif metric_name == "latency_sample_ms":
                 group["latency_samples"].append(value)
+            elif metric_name == "ingestion_lag_sample_ms":
+                group["ingestion_lag_samples"].append(value)
 
     bucket_metrics: list[dict[str, Any]] = []
     for key in sorted(groups):
@@ -1783,6 +1973,7 @@ def build_metric_summary(
         request_count = int(group["request_count"])
         error_count = int(group["error_count"])
         latency_samples = list(group["latency_samples"])
+        ingestion_lag_samples = list(group["ingestion_lag_samples"])
         throughput = rounded_float(Decimal(request_count) / Decimal(60))
 
         if request_count == 0:
@@ -1795,6 +1986,15 @@ def build_metric_summary(
         latency_p50, latency_p50_reason = nearest_rank_value(latency_samples, Decimal("0.50"), 1)
         latency_p95, latency_p95_reason = nearest_rank_value(latency_samples, Decimal("0.95"), 20)
         latency_p99, latency_p99_reason = nearest_rank_value(latency_samples, Decimal("0.99"), 100)
+        ingestion_lag_p50, ingestion_lag_p50_reason = nearest_rank_value(
+            ingestion_lag_samples, Decimal("0.50"), 1
+        )
+        ingestion_lag_p95, ingestion_lag_p95_reason = nearest_rank_value(
+            ingestion_lag_samples, Decimal("0.95"), 20
+        )
+        ingestion_lag_p99, ingestion_lag_p99_reason = nearest_rank_value(
+            ingestion_lag_samples, Decimal("0.99"), 100
+        )
 
         bucket_metrics.append(
             {
@@ -1803,6 +2003,7 @@ def build_metric_summary(
                 "bucket_start_utc": group["bucket_start_utc"],
                 "bucket_start_local": group["bucket_start_local"],
                 "source_for_m001_m007": group["source_for_m001_m007"],
+                "source_for_m008_m009": group["source_for_m008_m009"],
                 "source_locations": sorted(group["source_locations"]),
                 "metrics": {
                     "request_count": metric_value(m_id="M-001", value=request_count, unit="count"),
@@ -1839,16 +2040,45 @@ def build_metric_summary(
                         sample_count=len(latency_samples),
                         reason_code=latency_p99_reason,
                     ),
+                    "ingestion_lag_ms": ingestion_lag_metric(
+                        sample_count=len(ingestion_lag_samples),
+                        missing_input_count=int(group["ingestion_lag_missing_input_count"]),
+                        invalid_optional_field_count=int(group["ingestion_lag_invalid_optional_field_count"]),
+                        source=group["source_for_m008_m009"],
+                    ),
+                    "ingestion_lag_p50_ms": metric_value(
+                        m_id="M-009",
+                        value=ingestion_lag_p50,
+                        unit="ms",
+                        sample_count=len(ingestion_lag_samples),
+                        reason_code=ingestion_lag_p50_reason,
+                    ),
+                    "ingestion_lag_p95_ms": metric_value(
+                        m_id="M-009",
+                        value=ingestion_lag_p95,
+                        unit="ms",
+                        sample_count=len(ingestion_lag_samples),
+                        reason_code=ingestion_lag_p95_reason,
+                    ),
+                    "ingestion_lag_p99_ms": metric_value(
+                        m_id="M-009",
+                        value=ingestion_lag_p99,
+                        unit="ms",
+                        sample_count=len(ingestion_lag_samples),
+                        reason_code=ingestion_lag_p99_reason,
+                    ),
                 },
             }
         )
+
+    comparison_metrics = build_comparison_metrics(bucket_metrics)
 
     return {
         "schema_version": "0.1",
         "stage": CLI_STAGE,
         "status": record_summary["status"],
         "contract_version": CONTRACT_VERSION,
-        "calculated_m_ids": list(BASIC_METRIC_IDS),
+        "calculated_m_ids": list(CALCULATED_METRIC_IDS),
         "primary_telemetry": primary_telemetry,
         "bucket_size_seconds": 60,
         "time_basis": "UTC",
@@ -1856,6 +2086,8 @@ def build_metric_summary(
         "sort_order": ["service_path", "bucket_start_utc"],
         "bucket_count": len(bucket_metrics),
         "bucket_metrics": bucket_metrics,
+        "comparison_metrics": comparison_metrics,
+        "comparison_metric_count": len(comparison_metrics),
         "raw_excerpts_emitted": False,
     }
 
@@ -1998,7 +2230,7 @@ def success_payload(
     return {
         "schema_version": "0.1",
         "stage": CLI_STAGE,
-        "run_status": "basic_metrics_calculated_ready",
+        "run_status": "observability_and_comparison_metrics_calculated_ready",
         "exit_code": EXIT_CODES["ok"],
         "bundle": {
             "name": bundle_path.name,
@@ -2044,6 +2276,7 @@ def success_payload(
             "calculated_m_ids": metric_summary["calculated_m_ids"],
             "primary_telemetry": metric_summary["primary_telemetry"],
             "bucket_count": metric_summary["bucket_count"],
+            "comparison_metric_count": metric_summary["comparison_metric_count"],
             "sort_order": metric_summary["sort_order"],
             "raw_excerpts_emitted": False,
         },
@@ -2066,10 +2299,12 @@ def success_payload(
             "assign accepted in-window rows to UTC 60-second buckets",
             "write bucket-summary.json without raw excerpts",
             "calculate M-001 through M-007 basic bucket metrics",
+            "calculate M-008 through M-009 observability lag metrics",
+            "calculate M-010 through M-013 baseline-vs-incident comparison metrics",
             "write metric-summary.json without raw excerpts",
         ],
         "deferred_scope": [
-            "M-008 through M-017 metric calculation",
+            "M-015 through M-017 context and pipeline benchmark metric calculation",
             "bucket state and run state judgment",
             "evidence and claim generation",
             "analysis.json generation",

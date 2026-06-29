@@ -1851,3 +1851,66 @@
 - 새로운 중요 범위·아키텍처 결정은 없어 Decisionlog 새 항목은 만들지 않았습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-047 요약을 추가했고, fetch로 W-047 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
 - Git 동기화 완료: 경로 이식성 점검 W-047 기록을 커밋 `c313fe5c311c7111e27f27558fc1f91aef248d0b`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영합니다.
+
+### W-048 · Phase 4 P4-10 관측 지연·기준 비교 M-008~M-013
+
+**요청**
+
+- 다음 단계 구현을 진행합니다. 현재 순서상 P4-10 관측 지연과 기준 구간 대비 비교 M-008~M-013을 구현합니다.
+
+**수행 작업**
+
+- `run_openbell.py`의 단계명을 P4-10으로 올렸습니다.
+- 로그 입력의 `observed_time - event_time`으로 M-008 개별 관측 지연을 내부 계산하도록 했습니다.
+- `metric-summary.json`의 버킷별 metrics에 M-009 `ingestion_lag_p50_ms`, `ingestion_lag_p95_ms`, `ingestion_lag_p99_ms`를 추가했습니다.
+- 개별 M-008 값 목록은 출력하지 않고 `sample_count`, `missing_input_count`, `invalid_optional_field_count`, `individual_values_emitted=false`로 요약하도록 했습니다.
+- metrics-only 입력에서는 `ingestion_lag_sample_ms`를 관측 지연 표본으로 사용하도록 했습니다.
+- 서비스 경로 × 지표 단위의 `comparison_metrics`를 추가해 M-010 `baseline_median`, M-011 `incident_peak`, M-012 `change_abs`, M-013 `change_pct`를 계산했습니다.
+- 기준값이 0인 변화율은 `null`, `reason_code=zero_denominator`로 기록하도록 했습니다.
+- `src/tests/test_run_openbell_cli.py`에 Golden fixture 관측 지연, metrics-only 관측 지연, baseline comparison, 누락 `observed_time`, 상태 문자열 갱신 테스트를 추가했습니다.
+- `src/skills/openbell-guard/SKILL.md`를 P4-10 현재 구현 범위와 다음 구현 예정 범위에 맞게 갱신했습니다.
+- T-011과 D-027을 기록했습니다.
+- 이번 단계에서는 M-015~M-017, bucket 상태 판정, evidence·claim, 최종 `analysis.json` 생성을 구현하지 않았습니다.
+
+**변경 파일**
+
+- 수정: `src/skills/openbell-guard/scripts/run_openbell.py`
+- 수정: `src/tests/test_run_openbell_cli.py`
+- 수정: `src/skills/openbell-guard/SKILL.md`
+- 수정: `Troubleshootinglog.md`
+- 수정: `Decisionlog.md`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `python -m unittest .\src\tests\test_run_openbell_cli.py -v` 1차 실행에서 P4-09의 이전 `run_status` 기대값 때문에 1개 테스트가 실패했습니다. 코드 동작 오류가 아니라 테스트 기대값 미갱신이었고, P4-10 상태 문자열로 수정했습니다.
+- 수정 후 `python -m unittest .\src\tests\test_run_openbell_cli.py -v`를 다시 실행해 CLI·입력 검사·마스킹·행 단위 파서·버킷·M-001~M-013 테스트 26개가 모두 통과했습니다.
+- `python -m unittest discover -s src\tests -v`를 실행해 전체 테스트 38개가 모두 통과했습니다.
+- `python tools/preflight_check.py --quiet` 결과 `ok=5`, `warn=0`, `error=0`을 확인했습니다.
+- `python -m py_compile .\src\skills\openbell-guard\scripts\run_openbell.py .\src\tests\test_run_openbell_cli.py .\src\tests\test_contract_reference.py .\src\tests\test_domestic_market_open_min_fixture.py`가 통과했습니다.
+- `python .\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\src\tests\fixtures\domestic-market-open-min\bundle --output .\out\p4-10-smoke`를 실행해 exit 0, `stage=P4-10`, `run_status=observability_and_comparison_metrics_calculated_ready`, `calculated_m_ids=M-001~M-013`, `comparison_metric_count=6`, `analysis_json_created=false`를 확인했습니다.
+- `python $env:USERPROFILE\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src`가 통과했습니다.
+- `python -X utf8 $env:USERPROFILE\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard`가 `Skill is valid!`로 통과했습니다.
+- `out/p4-10-smoke` 주요 산출물을 `run_openbell.py`의 `find_sensitive_matches` 함수로 재검사했고 `no_sensitive_residue`를 확인했습니다.
+- `logs/` 파일은 수동 편집하지 않았습니다.
+
+**트러블슈팅**
+
+- T-011: 민감정보 잔존 검사 helper에 dict를 넘겨 `TypeError`가 발생했습니다. 제품 코드 오류가 아니라 검증 보조 명령의 helper 입력 형태 오해였고, 파일별 문자열 단위로 재검사해 `no_sensitive_residue`를 확인했습니다.
+- T-012: Notion 본문 삽입에서 기존 페이지 링크에 `<page>` 태그를 오사용해 API 오류가 발생했습니다. 일반 Markdown 링크 방식으로 재시도해 W-048 요약 삽입을 완료했습니다.
+
+**판단 근거**
+
+- M-008 개별 관측 지연값은 M-009 계산에는 필요하지만, 모든 개별값을 출력하면 산출물이 과도하게 커질 수 있어 내부 계산 후 요약만 남기는 구조를 선택했습니다.
+- 기준 비교는 장애 판정이 아니라 맥락 설명용이므로, bucket 상태 판정과 evidence·claim 생성은 다음 단계로 유지했습니다.
+- 기존 P4-09 출력 흐름을 유지하면서 `metric-summary.json`만 확장하면 최종 `analysis.json` 생성 전에도 수식 검증이 가능합니다.
+
+**결과**
+
+- P4-10이 완료됐습니다. 이제 OpenBell Guard는 M-001~M-013을 `metric-summary.json`에 계산합니다.
+- 관련 결정: D-027 `M-008 개별 관측 지연값은 내부 계산하고 출력에는 요약만 남김`
+- 현재 단계는 Phase 4의 P4-10/19이며, P4-09 기본 지표 계산 다음의 관측 지연·기준 비교 단계입니다.
+- 남은 태스크는 P4-11~P4-19 약 9단계이며, 예상 작업량은 높음입니다.
+- 다음 단계는 P4-11 bucket 상태 판정과 run 상태 요약입니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-048 요약을 추가하고 D-027 하위 페이지를 생성했으며, fetch로 두 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이고 D-027 URL은 `https://app.notion.com/p/38e05ea68bfc816b8e32e42579d6155c`입니다.
+- Git 동기화: 대기 중입니다. P4-10 산출물과 기록을 커밋하고 원격 `origin/main`에 push합니다.

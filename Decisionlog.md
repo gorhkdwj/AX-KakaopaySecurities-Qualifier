@@ -898,3 +898,37 @@ P4-06에서 계약의 7개 민감정보 패턴을 구현했습니다. 계약은 
 - 승인된 redaction marker 외의 민감 패턴이 마스킹 작업본에 남으면 exit `3`, `SEC002_SENSITIVE_RESIDUE`입니다.
 - 향후 계약 문서가 redaction marker 재검사 예외를 명시적으로 다르게 정의하면 이 결정을 재검토합니다.
 - P4-15 출력 검증기에서도 같은 원칙을 적용하되, 최종 산출물에 seeded 원문이 남아 있으면 계속 실패로 처리합니다.
+
+### D-027 · M-008 개별 관측 지연값은 내부 계산하고 출력에는 요약만 남김
+
+**상황**
+
+P4-10에서 계약 M-008~M-013을 구현하면서 `observed_time - event_time`으로 계산되는 개별 관측 지연값을 산출물에 어떻게 표현할지 결정해야 했습니다. M-008은 개별 레코드 단위 값이지만, 입력 로그가 커질 경우 모든 개별 지연값을 `metric-summary.json`에 그대로 펼치면 산출물 크기와 검토 부담이 커질 수 있습니다.
+
+**검토한 선택지**
+
+1. 모든 개별 `ingestion_lag_ms` 값을 `metric-summary.json`에 배열로 출력합니다.
+2. 개별 값을 전혀 계산하지 않고 `ingestion_lag_sample_ms`가 있는 metrics-only 입력만 처리합니다.
+3. 개별 `ingestion_lag_ms`는 내부에서 계산해 M-009 백분위수 표본으로 사용하고, 출력에는 표본 수·누락 수·M-009 백분위수와 기준 비교 결과만 남깁니다.
+
+**결정**
+
+- 선택지 3을 채택합니다.
+- 로그 입력에서는 `observed_time - event_time`으로 개별 M-008 값을 계산합니다.
+- 개별 값 목록은 출력하지 않고 `ingestion_lag_ms` 항목에 `sample_count`, `missing_input_count`, `invalid_optional_field_count`, `individual_values_emitted=false`를 기록합니다.
+- M-009는 유효한 개별 관측 지연 표본 또는 metrics-only 입력의 `ingestion_lag_sample_ms`로 p50·p95·p99를 계산합니다.
+- M-010~M-013은 버킷별 scalar 지표를 기준으로 서비스 경로 × 지표 단위의 비교 요약을 생성합니다.
+
+**근거**
+
+- M-008 개별값은 M-009 계산에 필요하지만, 모든 값을 출력하면 대용량 입력에서 JSON이 과도하게 커집니다.
+- 관측 지연의 판단에는 개별 원시 목록보다 표본 수, 누락 수, 백분위수, 기준 대비 변화량이 더 직접적으로 유용합니다.
+- 원본 로그 메시지와 상세 레코드 내용을 출력하지 않는 보안·경량성 원칙과도 맞습니다.
+- metrics-only 입력에서도 `ingestion_lag_sample_ms`를 표본으로 받아 같은 M-009·비교 계산 경로를 재사용할 수 있습니다.
+
+**영향 및 재검토 조건**
+
+- `metric-summary.json`은 M-008 개별값 목록을 제공하지 않습니다.
+- 후속 `analysis.json`과 보고서는 M-009 백분위수와 M-010~M-013 비교 결과를 중심으로 관측 지연을 설명합니다.
+- 특정 레코드의 관측 지연값을 evidence로 직접 연결해야 하는 요구가 생기면, 원본값 전체 배열이 아니라 제한된 마스킹 evidence 방식으로 재검토합니다.
+- P4-15 출력 검증에서는 `individual_values_emitted=false`와 원문 비노출 원칙을 함께 검사할 수 있습니다.
