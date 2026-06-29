@@ -2100,3 +2100,67 @@
 - 다음 단계는 P4-14 최종 `analysis.json` 생성입니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-051 요약을 추가하고 D-030 하위 페이지를 생성했으며, fetch로 두 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이고 D-030 URL은 `https://app.notion.com/p/38e05ea68bfc8129ac50d0beeeb27ee0`입니다.
 - Git 동기화 완료: P4-13 산출물과 W-051/D-030/T-012 후속 기록을 커밋 `198f18d91ae5fad3c058384d01172b2ec87ff587`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영합니다.
+
+### W-052 · Phase 4 P4-14 analysis/sanitization 출력
+
+**요청**
+
+- 다음 단계 구현을 진행합니다. 현재 순서상 P4-14 최종 `analysis.json` 생성을 구현합니다.
+
+**수행 작업**
+
+- `run_openbell.py`의 단계명을 P4-14로 올렸습니다.
+- 중간 산출물인 `record-summary.json`, `metric-summary.json`, `state-summary.json`, `evidence-summary.json`을 병합해 최종 기계 검증용 `analysis.json`을 생성하도록 했습니다.
+- `analysis.json`에 `schema_version`, `contract_version`, 계약 SHA-256, 사고 구간, source summary, M-014 record counts, 서비스 경로 상태, bucket 지표, 비교 지표, M-015 맥락 지표, evidence와 claim을 포함했습니다.
+- `analysis.json`에는 원본 번들의 절대경로와 원문 로그 메시지를 넣지 않도록 했습니다.
+- `bucket_metrics[].breach_reasons`는 최종 원장용 `metric`, `value`, `threshold`, `operator` 필드로 정규화했습니다.
+- CLI 성공 요약을 `run_status=analysis_ready`, `analysis_json_created=true`로 갱신하고 analysis 요약 섹션을 추가했습니다.
+- `src/tests/test_run_openbell_cli.py`에 Golden 핵심 값 보존, evidence·claim 참조, `analysis.json` 비밀정보 비노출 테스트를 추가했습니다.
+- `src/skills/openbell-guard/SKILL.md`를 P4-14 현재 구현 범위와 한계에 맞게 갱신했습니다.
+- D-031을 기록했습니다.
+- 이번 단계에서는 P4-15 출력 검증기, 사람용 Markdown 보고서, M-016~M-017 benchmark를 구현하지 않았습니다.
+
+**변경 파일**
+
+- 수정: `src/skills/openbell-guard/scripts/run_openbell.py`
+- 수정: `src/tests/test_run_openbell_cli.py`
+- 수정: `src/skills/openbell-guard/SKILL.md`
+- 수정: `Decisionlog.md`
+- 수정: `Troubleshootinglog.md`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `python -m py_compile .\src\skills\openbell-guard\scripts\run_openbell.py .\src\tests\test_run_openbell_cli.py`가 통과했습니다.
+- `python -m unittest .\src\tests\test_run_openbell_cli.py -v`를 실행해 CLI·입력 검사·마스킹·행 단위 파서·버킷·M-001~M-015·상태 판정·evidence·claim·analysis 출력 테스트 34개가 모두 통과했습니다.
+- `python -m unittest discover -s src\tests -v`를 실행해 전체 테스트 46개가 모두 통과했습니다.
+- `python .\tools\preflight_check.py --quiet` 결과 `SUMMARY ok=5 warn=0 error=0`을 확인했습니다.
+- `python $env:USERPROFILE\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src`가 `Plugin validation passed`로 통과했습니다.
+- `python -X utf8 $env:USERPROFILE\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard`가 `Skill is valid!`로 통과했습니다.
+- `python .\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\src\tests\fixtures\domestic-market-open-min\bundle --output .\out\p4-14-smoke`를 실행해 exit 0, `stage=P4-14`, `run_status=analysis_ready`, `analysis_json_created=true`, `analysis.run_status=complete`, `bucket_metric_count=3`, `evidence_count=5`, `claim_count=5`, `contract_sha256=64551154261053147424c72d1156ebaaff9d6b2b73ca6531bfa28cf318650f6b`를 확인했습니다.
+- `out/p4-14-smoke` 주요 산출물에서 원문 로그 문구 `market data request synthetic timeout`, `Authorization: Bearer `, `api_key=`, `sk-`, `eyJ` 패턴이 발견되지 않음을 확인했습니다.
+- `logs/` 파일은 수동 편집하지 않았습니다.
+
+**트러블슈팅**
+
+- T-013을 기록했습니다.
+- 최초 analysis 출력 테스트에서 최종 `analysis.json`에 내부용 `threshold_key`가 포함되어 Golden 핵심 `breach_reasons` 구조와 어긋났습니다.
+- `analysis_bucket_metrics()`에서 `breach_reasons`를 최종 원장용 필드로 정규화한 뒤 CLI 테스트 34개와 전체 테스트 46개가 모두 통과했습니다.
+
+**판단 근거**
+
+- `analysis.json`은 보고서의 입력이자 출력 검증기의 기준 원장이므로, 중간 산출물을 단순 복사하지 않고 최종 계약 필드로 정규화했습니다.
+- P4-13에서 이미 evidence·claim을 검증했으므로 P4-14는 새 추론을 만들지 않고 검증된 중간 결과를 결정론적으로 병합했습니다.
+- 사람용 Markdown 보고서는 Codex가 검증된 `analysis.json`을 읽어 작성해야 하므로, 이번 단계에서는 생성하지 않았습니다.
+- Golden 핵심 값은 유지하되 P4-13에서 추가된 hypothesis, context evidence, claim marker까지 `analysis.json`에 보존했습니다.
+
+**결과**
+
+- P4-14가 완료됐습니다. 이제 OpenBell Guard는 최종 기계 검증용 `analysis.json`을 생성하고, CLI 요약에서 `analysis_ready` 상태를 보고합니다.
+- 관련 결정: D-031 `analysis.json은 중간 산출물 단순 복사가 아니라 정규화된 검증 원장으로 생성`
+- 관련 트러블슈팅: T-013 `analysis.json에 내부용 breach_reasons 필드가 그대로 섞인 문제`
+- 현재 단계는 Phase 4의 P4-14/19이며, P4-13 evidence·claim 다음의 analysis/sanitization 출력 단계입니다.
+- 남은 태스크는 P4-15~P4-19 약 5단계이며, 예상 작업량은 높음입니다.
+- 다음 단계는 P4-15 출력 검증기입니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-052 요약을 추가하고 D-031 하위 페이지를 생성했으며, fetch로 두 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이고 D-031 URL은 `https://app.notion.com/p/38e05ea68bfc8180ac49c4c5d89d49c4`입니다.
+- Git 동기화 대기: P4-14 산출물과 W-052/D-031/T-013 기록을 커밋하고 원격 `origin/main`에 push해야 합니다.

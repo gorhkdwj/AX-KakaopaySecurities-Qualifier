@@ -14,6 +14,7 @@
 | 한글 문자열이나 Markdown 문구 자동 검증 전 | T-002 | UTF-8 파일 읽기와 ASCII 식별자 또는 코드포인트 기반 검증을 우선합니다. | `python tools/preflight_check.py` |
 | Notion 동기화 전후 | T-003 | fetch 도구 노출 여부와 검색 인덱스 검증 한계를 분리해 기록합니다. | 수동 확인 |
 | Git 상태 확인 전 | T-004 | Git 저장소 유효성을 먼저 확인하고, 실패 시 파일 시스템 기준으로 보고합니다. | `python tools/preflight_check.py` |
+| 최종 출력 JSON 구조 작성 전 | T-013 | 내부 중간 산출물 필드를 그대로 노출하지 말고 최종 원장용 필드로 정규화합니다. | CLI·전체 unittest |
 
 ## 기록 원칙
 
@@ -406,3 +407,34 @@
 - 2026-06-30 W-051 Notion 동기화 중 D-030 페이지를 Phase 4 본문에 `<page url="...">` 태그로 참조하려 하면서 같은 validation error가 재발했습니다.
 - 즉시 일반 Markdown 링크 `[D-030](https://app.notion.com/p/38e05ea68bfc8129ac50d0beeeb27ee0)` 방식으로 재시도해 W-051 삽입을 성공시켰습니다.
 - 이후 Notion 본문 삽입 시 기존 페이지는 `<page>` 태그 대신 일반 링크를 기본값으로 사용해야 합니다.
+
+### T-013 · analysis.json에 내부용 breach_reasons 필드가 그대로 섞인 문제
+
+**발생 단계**
+
+- Phase/P4 단계: Phase 4 / P4-14 analysis/sanitization 출력
+- 관련 W-ID: W-052
+
+**증상**
+
+- 새로 추가한 `test_fixture_analysis_json_preserves_golden_core_and_claim_refs`가 실패했습니다.
+- 실패 지점은 `analysis.json.bucket_metrics[].breach_reasons` 비교였습니다.
+- 값 자체의 장애 판정은 맞았지만, 최종 `analysis.json`에 내부 상태 판정용 `threshold_key`가 포함되고 `threshold` 표현이 Golden 핵심 구조와 달랐습니다.
+
+**확인한 원인**
+
+- `analysis.json`을 만들 때 `state-summary.json`의 `breach_reasons`를 그대로 복사했습니다.
+- `state-summary.json`은 내부 판정 추적을 위해 `threshold_key`를 보존하지만, 최종 기계 검증용 원장은 Golden 기준의 `metric`, `value`, `threshold`, `operator`만 필요합니다.
+- 제품 기능의 계산 오류가 아니라 중간 산출물과 최종 산출물의 표현 계층을 분리하지 않은 출력 정규화 오류였습니다.
+
+**조치**
+
+- `analysis_bucket_metrics()`에서 `breach_reasons`를 최종 원장용 필드로 재구성했습니다.
+- 최종 `analysis.json`에는 `metric`, `value`, `threshold`, `operator`만 남기고, `threshold`는 `float`로 정규화했습니다.
+- 수정 후 CLI 테스트 34개와 전체 테스트 46개가 모두 통과했습니다.
+
+**재발 방지·후속 조치**
+
+- P4-15 출력 검증기에서는 중간 산출물 전용 필드와 최종 산출물 필드가 섞이지 않는지 검사해야 합니다.
+- `analysis.json`을 만들 때는 중간 JSON을 단순 병합하지 말고, 보고·검증에 필요한 최종 계약 필드만 명시적으로 투영합니다.
+- Golden 핵심 구조와 다를 때는 테스트를 완화하기보다 최종 산출물의 목적에 맞는 정규화 여부를 먼저 확인합니다.

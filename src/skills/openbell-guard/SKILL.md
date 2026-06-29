@@ -7,7 +7,7 @@ description: Analyze a synthetic or anonymized post-incident brokerage bundle fo
 
 OpenBell Guard는 카카오페이증권 AX 해커톤 제출물을 위한 Codex Skill입니다.
 
-현재 구현 상태는 Phase 4의 P4-13 evidence·claim 구성 단계입니다. 플러그인 구조, 지표 계약 복사본, 최소 합성 fixture와 `run_openbell.py --bundle --output` 실행 입구가 있습니다.
+현재 구현 상태는 Phase 4의 P4-14 analysis/sanitization 출력 단계입니다. 플러그인 구조, 지표 계약 복사본, 최소 합성 fixture와 `run_openbell.py --bundle --output` 실행 입구가 있습니다.
 
 ## 현재 사용 가능한 범위
 
@@ -23,7 +23,8 @@ OpenBell Guard는 카카오페이증권 AX 해커톤 제출물을 위한 Codex S
 - CLI는 메트릭 fallback에서 같은 버킷의 `error_count > request_count`가 발견되면 `MET001_COUNT_INCONSISTENT`로 기록하고 해당 요청·오류 집계를 무효화합니다.
 - CLI는 설정된 임계치로 버킷 상태, 서비스 경로 상태, 장애 시작과 회복 시각을 판정해 `state-summary.json`을 생성합니다.
 - CLI는 확인된 사실, 원인 가설과 판단 불가 항목을 근거 ID와 연결해 `evidence-summary.json`을 생성합니다.
-- 아직 최종 분석 산출물인 `analysis.json`과 Markdown 보고서는 생성하지 않습니다.
+- CLI는 중간 산출물을 병합해 최종 기계 검증용 `analysis.json`을 생성합니다.
+- 아직 사람용 Markdown 보고서인 `openbell-report.md`는 생성하지 않습니다.
 
 ## 실행 예시
 
@@ -41,8 +42,9 @@ python src/skills/openbell-guard/scripts/run_openbell.py --bundle src/tests/fixt
 - `metric-summary.json`
 - `state-summary.json`
 - `evidence-summary.json`
+- `analysis.json`
 
-이 산출물들은 P4-13 중간 분석 결과입니다. 최종 제출용 보고서 기준 산출물인 `analysis.json`은 아직 생성하지 않습니다.
+`analysis.json`은 P4-14 기준 최종 기계 검증용 원장입니다. 아직 사람용 Markdown 보고서인 `openbell-report.md`는 생성하지 않습니다.
 
 ## 기본 지표 계산 기준
 
@@ -93,6 +95,13 @@ python src/skills/openbell-guard/scripts/run_openbell.py --bundle src/tests/fixt
 - 로그 원문 메시지를 그대로 펼치지 않고, 계산된 요약과 논리 위치만 근거로 남깁니다.
 - CPU·메모리 값은 맥락 근거로 사용할 수 있지만, 단독으로 자원 포화나 근본 원인을 확정하지 않습니다.
 
+## analysis.json 기준
+
+- `analysis.json`은 `record-summary.json`, `metric-summary.json`, `state-summary.json`, `evidence-summary.json`을 병합한 기계 검증용 기준 산출물입니다.
+- `contract_version`, 계약 파일 SHA-256, 사고 구간, 처리 레코드 수, 서비스 경로 상태, bucket 지표, 비교 지표, 맥락 지표, evidence와 claim을 포함합니다.
+- `analysis.json`에는 원본 번들의 절대경로와 원문 로그 메시지를 넣지 않습니다.
+- `analysis.json`은 보고서 초안이 아니라 후속 출력 검증기와 Markdown 보고서 작성의 입력입니다.
+
 ## 안전 원칙
 
 - OpenBell Guard는 읽기 전용 분석 도구입니다.
@@ -102,4 +111,4 @@ python src/skills/openbell-guard/scripts/run_openbell.py --bundle src/tests/fixt
 
 ## 다음 구현 예정 범위
 
-다음 단계에서는 최종 `analysis.json`, 출력 검증기, 보고서 템플릿, 파이프라인 실행시간·Python 추적 메모리 benchmark를 순차적으로 구현합니다.
+다음 단계에서는 출력 검증기, 보고서 템플릿, 파이프라인 실행시간·Python 추적 메모리 benchmark를 순차적으로 구현합니다.

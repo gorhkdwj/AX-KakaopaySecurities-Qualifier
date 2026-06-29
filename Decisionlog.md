@@ -1035,3 +1035,37 @@ P4-13에서 최종 `analysis.json`을 만들기 전에 확인된 사실, 원인 
 - P4-15 출력 검증기는 claim의 evidence 참조 존재 여부, 원문 메시지·절대경로·비밀정보 잔존 여부를 검사할 수 있습니다.
 - 보고서 문구는 `C-###` claim marker를 통해 evidence와 연결할 수 있습니다.
 - 향후 `analysis.json` 생성 후 중간 산출물을 줄여야 할 필요가 생기면 제출 패키징 단계에서 보존 여부를 재검토합니다.
+
+### D-031 · `analysis.json`은 중간 산출물 단순 복사가 아니라 정규화된 검증 원장으로 생성
+
+**상황**
+
+P4-14에서 `record-summary.json`, `metric-summary.json`, `state-summary.json`, `evidence-summary.json`을 바탕으로 최종 기계 검증용 `analysis.json`을 만들어야 했습니다. 이때 중간 산출물을 그대로 합칠지, P4-15 출력 검증기까지 미룰지, 최종 원장용 구조로 명시적으로 투영할지 결정해야 했습니다.
+
+**검토한 선택지**
+
+1. 기존 중간 산출물들을 거의 그대로 `analysis.json`에 합칩니다.
+2. `analysis.json` 생성을 P4-15 출력 검증기 구현 시점까지 미룹니다.
+3. P4-14에서 중간 산출물을 입력으로 사용하되, 최종 원장에 필요한 필드만 명시적으로 정규화해 `analysis.json`을 생성합니다.
+
+**결정**
+
+- 선택지 3을 채택합니다.
+- `analysis.json`은 `schema_version`, `contract_version`, 계약 SHA-256, 사고 구간, source summary, M-014 record counts, 서비스 경로 상태, bucket 지표, 비교 지표, M-015 맥락 지표, evidence와 claim을 포함합니다.
+- `bucket_metrics`에는 bucket 상태와 필요한 `breach_reasons`를 포함하되, 내부 판정용 `threshold_key` 같은 중간 산출물 전용 필드는 최종 원장에 노출하지 않습니다.
+- `analysis.json`에는 원본 번들의 절대경로, 원문 로그 메시지, 비밀값을 넣지 않습니다.
+- P4-14는 사람용 Markdown 보고서와 출력 검증기를 만들지 않고, 이 둘은 P4-15~P4-16으로 유지합니다.
+
+**근거**
+
+- 단순 병합은 빠르지만 중간 산출물의 내부 추적 필드가 최종 검증 원장에 섞일 수 있습니다.
+- `analysis.json`은 보고서와 검증기의 기준 입력이므로, 사람이 검토할 수 있는 안정적인 최종 필드 집합을 가져야 합니다.
+- P4-13에서 이미 evidence·claim 참조를 독립적으로 검증했으므로, P4-14는 새 추론을 만들기보다 검증된 중간 결과를 결정론적으로 투영하는 것이 안전합니다.
+- Golden fixture의 핵심 값과 P4-13의 확장 evidence·claim을 함께 보존해야 제출물·문서·테스트의 정합성이 유지됩니다.
+
+**영향 및 재검토 조건**
+
+- P4-15 출력 검증기는 `analysis.json`을 기준으로 schema, evidence 참조, confirmed fact 근거, 비밀정보 잔존 여부를 검사합니다.
+- `state-summary.json` 등 중간 산출물은 디버깅과 단계 검증용으로 남기되, 후속 보고서의 기준은 `analysis.json`입니다.
+- 향후 제출 패키징에서 중간 산출물을 줄일 필요가 생기면 `analysis.json`을 기준으로 보존 범위를 재검토합니다.
+- P4-15에서 schema 요구가 바뀌면 `analysis.json`의 필드 집합과 D-031을 함께 재검토합니다.

@@ -1,9 +1,10 @@
 """OpenBell Guard command-line entry point.
 
-P4-13 implements the shared CLI, bundle preflight gate, sanitizer,
+P4-14 implements the shared CLI, bundle preflight gate, sanitizer,
 line-oriented telemetry parser, 60-second bucket preparation, basic bucket
 metrics, observability lag metrics, baseline-vs-incident comparisons, and
-threshold-based state judgment with context metrics and evidence-backed claims:
+threshold-based state judgment with context metrics, evidence-backed claims,
+and the final machine-verifiable ``analysis.json``:
 
 - parse ``--bundle`` and ``--output``;
 - verify that the bundle is an existing, non-symlink directory;
@@ -27,15 +28,18 @@ threshold-based state judgment with context metrics and evidence-backed claims:
 - judge bucket state, service-path state, outage start, recovery time, and
   successful run status into ``state-summary.json``.
 - create evidence and claim summaries without raw excerpts.
+- write ``analysis.json`` by merging metric, state, and evidence summaries
+  without raw excerpts.
 
-It still does not create the final ``analysis.json``. That behavior belongs to
-later Phase 4 steps and must keep using this entry point.
+It still does not create the human-readable Markdown report. That behavior
+belongs to later Phase 4 steps and must keep using this entry point.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import io
 import json
 import math
@@ -56,8 +60,9 @@ EXIT_CODES = {
     "output_validation_error": 5,
 }
 
-CLI_STAGE = "P4-13"
+CLI_STAGE = "P4-14"
 SUMMARY_FILENAME = "openbell-cli-summary.json"
+ANALYSIS_FILENAME = "analysis.json"
 SANITIZED_BUNDLE_DIR = "sanitized-bundle"
 SANITIZATION_REPORT = "sanitization-report.md"
 RECORD_SUMMARY_FILENAME = "record-summary.json"
@@ -67,6 +72,7 @@ STATE_SUMMARY_FILENAME = "state-summary.json"
 EVIDENCE_SUMMARY_FILENAME = "evidence-summary.json"
 SCHEMA_VERSION = "1.0"
 CONTRACT_VERSION = "1.0.0"
+CONTRACT_REFERENCE_RELATIVE_PATH = "src/skills/openbell-guard/references/metrics-validation-contract.md"
 BASIC_METRIC_IDS = ("M-001", "M-002", "M-003", "M-004", "M-005", "M-006", "M-007")
 OBSERVABILITY_METRIC_IDS = ("M-008", "M-009")
 COMPARISON_METRIC_IDS = ("M-010", "M-011", "M-012", "M-013")
@@ -225,10 +231,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="run_openbell.py",
         description=(
-            "Prepare an OpenBell Guard run directory. P4-13 validates the CLI, "
+            "Prepare an OpenBell Guard run directory. P4-14 validates the CLI, "
             "paths, bundle file contract, byte limits, incident metadata, and "
             "creates a masked working copy, telemetry record summary, bucket summary, "
-            "metric summary, threshold-based state summary, and evidence summary."
+            "metric summary, threshold-based state summary, evidence summary, and "
+            "analysis.json."
         ),
     )
     parser.add_argument(
@@ -2989,6 +2996,147 @@ def parse_telemetry_records(
     return summary, bucket_summary, metric_summary, state_summary, None
 
 
+def contract_reference_path() -> Path:
+    return Path(__file__).resolve().parents[1] / "references" / "metrics-validation-contract.md"
+
+
+def contract_reference_sha256() -> tuple[str | None, dict[str, Any] | None]:
+    try:
+        digest = hashlib.sha256(contract_reference_path().read_bytes()).hexdigest()
+    except OSError:
+        return None, issue_payload(
+            exit_code=EXIT_CODES["output_validation_error"],
+            issue_code="OUT001_SCHEMA",
+            message="The metric contract reference could not be read for analysis.json.",
+            argument="output",
+        )
+    return digest, None
+
+
+def source_files_from_preflight(preflight_summary: dict[str, Any]) -> list[str]:
+    files = preflight_summary.get("files", [])
+    names: list[str] = []
+    if isinstance(files, list):
+        for item in files:
+            if isinstance(item, dict) and isinstance(item.get("name"), str):
+                names.append(str(item["name"]))
+    return sorted(names)
+
+
+def analysis_context_files(*, preflight_summary: dict[str, Any], primary_telemetry: str | None) -> list[str]:
+    available_files = set(source_files_from_preflight(preflight_summary))
+    context_order = ("logs.jsonl", "metrics.csv", "service-map.json")
+    return [name for name in context_order if name in available_files and name != primary_telemetry]
+
+
+def analysis_bucket_metrics(
+    *, metric_summary: dict[str, Any], state_summary: dict[str, Any]
+) -> list[dict[str, Any]]:
+    states_by_key = {
+        (str(state["service_path"]), str(state["bucket_start_utc"])): state
+        for state in state_summary.get("bucket_states", [])
+    }
+    buckets: list[dict[str, Any]] = []
+    for bucket in metric_summary.get("bucket_metrics", []):
+        key = (str(bucket["service_path"]), str(bucket["bucket_start_utc"]))
+        state = states_by_key.get(key, {})
+        analysis_bucket: dict[str, Any] = {
+            "service_path": bucket["service_path"],
+            "window_type": bucket["window_type"],
+            "bucket_start_utc": bucket["bucket_start_utc"],
+            "bucket_start_local": bucket["bucket_start_local"],
+            "bucket_state": state.get("bucket_state", "unknown"),
+            "metrics": bucket["metrics"],
+        }
+        if "breach_reasons" in state:
+            analysis_bucket["breach_reasons"] = [
+                {
+                    "metric": reason["metric"],
+                    "value": reason["value"],
+                    "threshold": float(reason["threshold"]),
+                    "operator": reason["operator"],
+                }
+                for reason in state["breach_reasons"]
+            ]
+        buckets.append(analysis_bucket)
+    return sorted(buckets, key=lambda item: (str(item["service_path"]), str(item["bucket_start_utc"])))
+
+
+def build_analysis_summary(
+    *,
+    preflight_summary: dict[str, Any],
+    record_summary: dict[str, Any],
+    metric_summary: dict[str, Any],
+    state_summary: dict[str, Any],
+    evidence_summary: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    contract_sha256, issue = contract_reference_sha256()
+    if issue is not None:
+        return None, issue
+    assert contract_sha256 is not None
+
+    incident = preflight_summary["incident"]
+    run_issues = list(record_summary.get("issues", [])) + list(metric_summary.get("issues", []))
+    run_state = state_summary["run"]
+    primary_telemetry = record_summary.get("primary_telemetry")
+    analysis = {
+        "schema_version": SCHEMA_VERSION,
+        "stage": CLI_STAGE,
+        "contract_version": CONTRACT_VERSION,
+        "contract_sha256": contract_sha256,
+        "fixture_id": incident["incident_id"],
+        "run": {
+            "status": run_state["status"],
+            "exit_code": run_state["exit_code"],
+            "issue_counts": run_state.get("issue_counts", {}),
+            "issues": run_issues,
+            "limitations": run_state.get("limitations", []),
+        },
+        "incident": {
+            "incident_id": incident["incident_id"],
+            "timezone": incident["timezone"],
+            "baseline_window": incident["baseline_window"],
+            "incident_window": incident["incident_window"],
+        },
+        "source_summary": {
+            "primary_telemetry": primary_telemetry,
+            "context_files": analysis_context_files(
+                preflight_summary=preflight_summary,
+                primary_telemetry=str(primary_telemetry) if primary_telemetry is not None else None,
+            ),
+            "metric_contract_reference": CONTRACT_REFERENCE_RELATIVE_PATH,
+        },
+        "record_counts": record_summary["record_counts"],
+        "service_paths": state_summary["service_paths"],
+        "bucket_metrics": analysis_bucket_metrics(
+            metric_summary=metric_summary,
+            state_summary=state_summary,
+        ),
+        "comparison_metrics": metric_summary["comparison_metrics"],
+        "context_metrics": metric_summary["context_metrics"],
+        "evidence": evidence_summary["evidence"],
+        "claims": evidence_summary["claims"],
+        "raw_excerpts_emitted": False,
+    }
+    return analysis, None
+
+
+def write_analysis_summary(*, output_path: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        (output_path / ANALYSIS_FILENAME).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        return issue_payload(
+            exit_code=EXIT_CODES["output_validation_error"],
+            issue_code="CLI019_ANALYSIS_WRITE_FAILED",
+            message="The analysis.json file could not be written.",
+            argument="output",
+        )
+    return None
+
+
 def write_state_summary(*, output_path: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
     try:
         (output_path / STATE_SUMMARY_FILENAME).write_text(
@@ -3118,11 +3266,12 @@ def success_payload(
     metric_summary: dict[str, Any],
     state_summary: dict[str, Any],
     evidence_summary: dict[str, Any],
+    analysis_summary: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "schema_version": "0.1",
         "stage": CLI_STAGE,
-        "run_status": "evidence_claim_ready",
+        "run_status": "analysis_ready",
         "exit_code": EXIT_CODES["ok"],
         "bundle": {
             "name": bundle_path.name,
@@ -3145,7 +3294,8 @@ def success_payload(
             "state_summary_created": True,
             "evidence_summary_file": EVIDENCE_SUMMARY_FILENAME,
             "evidence_summary_created": True,
-            "analysis_json_created": False,
+            "analysis_json_file": ANALYSIS_FILENAME,
+            "analysis_json_created": True,
             "sanitization_report_created": True,
             "sanitization_report_file": SANITIZATION_REPORT,
         },
@@ -3195,6 +3345,19 @@ def success_payload(
             "claim_counts": evidence_summary["claim_counts"],
             "raw_excerpts_emitted": False,
         },
+        "analysis": {
+            "analysis_json_file": ANALYSIS_FILENAME,
+            "schema_version": analysis_summary["schema_version"],
+            "contract_version": analysis_summary["contract_version"],
+            "contract_sha256": analysis_summary["contract_sha256"],
+            "fixture_id": analysis_summary["fixture_id"],
+            "run_status": analysis_summary["run"]["status"],
+            "service_path_count": len(analysis_summary["service_paths"]),
+            "bucket_metric_count": len(analysis_summary["bucket_metrics"]),
+            "evidence_count": len(analysis_summary["evidence"]),
+            "claim_count": len(analysis_summary["claims"]),
+            "raw_excerpts_emitted": False,
+        },
         "implemented_scope": [
             "parse --bundle and --output",
             "validate bundle directory existence",
@@ -3224,10 +3387,12 @@ def success_payload(
             "write state-summary.json without raw excerpts",
             "create evidence and claim summaries without raw excerpts",
             "write evidence-summary.json without raw excerpts",
+            "write analysis.json without raw excerpts",
         ],
         "deferred_scope": [
+            "analysis.json output validator",
+            "openbell-report.md generation",
             "M-016 through M-017 pipeline benchmark metric calculation",
-            "analysis.json generation",
         ],
         "exit_code_skeleton": EXIT_CODES,
     }
@@ -3293,6 +3458,17 @@ def run(bundle_arg: str, output_arg: str) -> int:
         metric_summary=metric_summary,
         state_summary=state_summary,
     )
+    analysis_summary, issue = build_analysis_summary(
+        preflight_summary=preflight_summary,
+        record_summary=record_summary,
+        metric_summary=metric_summary,
+        state_summary=state_summary,
+        evidence_summary=evidence_summary,
+    )
+    if issue is not None:
+        write_stderr_json(issue)
+        return int(issue["exit_code"])
+    assert analysis_summary is not None
 
     issue = write_record_summary(output_path=output_path, payload=record_summary)
     if issue is not None:
@@ -3314,6 +3490,10 @@ def run(bundle_arg: str, output_arg: str) -> int:
     if issue is not None:
         write_stderr_json(issue)
         return int(issue["exit_code"])
+    issue = write_analysis_summary(output_path=output_path, payload=analysis_summary)
+    if issue is not None:
+        write_stderr_json(issue)
+        return int(issue["exit_code"])
 
     payload = success_payload(
         bundle_path=bundle_path,
@@ -3324,6 +3504,7 @@ def run(bundle_arg: str, output_arg: str) -> int:
         metric_summary=metric_summary,
         state_summary=state_summary,
         evidence_summary=evidence_summary,
+        analysis_summary=analysis_summary,
     )
     issue = write_summary(output_path=output_path, payload=payload)
     if issue is not None:
