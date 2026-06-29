@@ -1,7 +1,8 @@
-"""CLI skeleton tests for OpenBell Guard.
+"""CLI and bundle-preflight tests for OpenBell Guard.
 
-P4-04 tests only the shared command-line entry point and path safety. The
-script must not analyze raw telemetry files yet.
+P4-05 keeps the shared command-line entry point and adds the first bundle
+preflight gate. The script still must not analyze telemetry records or create
+the final analysis outputs.
 """
 
 from __future__ import annotations
@@ -33,6 +34,22 @@ FIXTURE_BUNDLE = (
     / "bundle"
 )
 
+VALID_INCIDENT = {
+    "schema_version": "1.0",
+    "contract_version": "1.0.0",
+    "incident_id": "temp-valid",
+    "timezone": "Asia/Seoul",
+    "baseline_window": {
+        "start": "2026-06-30T08:58:00+09:00",
+        "end": "2026-06-30T08:59:00+09:00",
+    },
+    "incident_window": {
+        "start": "2026-06-30T09:00:00+09:00",
+        "end": "2026-06-30T09:02:00+09:00",
+    },
+    "thresholds": {"market_data": {"error_rate_pct_max": 50.0}},
+}
+
 
 def load_run_openbell_module():
     spec = importlib.util.spec_from_file_location("run_openbell", SCRIPT_PATH)
@@ -51,6 +68,18 @@ def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         check=False,
     )
+
+
+def write_json(path: Path, payload: dict) -> None:
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def write_valid_incident(bundle_path: Path, payload: dict | None = None) -> None:
+    write_json(bundle_path / "incident.json", payload or VALID_INCIDENT)
+
+
+def write_minimal_logs(bundle_path: Path) -> None:
+    (bundle_path / "logs.jsonl").write_text("{}\n", encoding="utf-8")
 
 
 class RunOpenBellCliTest(unittest.TestCase):
@@ -77,11 +106,14 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertTrue(summary_path.exists())
 
             payload = json.loads(summary_path.read_text(encoding="utf-8"))
-            self.assertEqual("P4-04", payload["stage"])
-            self.assertEqual("cli_ready", payload["run_status"])
-            self.assertFalse(payload["bundle"]["raw_telemetry_files_read"])
+            self.assertEqual("P4-05", payload["stage"])
+            self.assertEqual("bundle_preflight_ready", payload["run_status"])
+            self.assertFalse(payload["bundle"]["raw_telemetry_records_parsed"])
+            self.assertFalse(payload["bundle"]["raw_excerpts_emitted"])
             self.assertFalse(payload["outputs"]["analysis_json_created"])
             self.assertFalse(payload["outputs"]["sanitization_report_created"])
+            self.assertEqual("domestic-market-open-min", payload["bundle"]["preflight"]["incident"]["incident_id"])
+            self.assertEqual(4, len(payload["bundle"]["preflight"]["files"]))
 
             serialized = json.dumps(payload, ensure_ascii=False)
             self.assertNotIn(str(FIXTURE_BUNDLE), serialized)
@@ -117,6 +149,127 @@ class RunOpenBellCliTest(unittest.TestCase):
         self.assertEqual(5, completed.returncode)
         self.assertIn("CLI011_OUTPUT_OVERLAPS_BUNDLE", completed.stderr)
         self.assertFalse((FIXTURE_BUNDLE / "openbell-out").exists())
+
+
+class BundlePreflightValidationTest(unittest.TestCase):
+    def test_missing_incident_returns_inp001_before_output_creation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            bundle_path.mkdir()
+            write_minimal_logs(bundle_path)
+            output_path = Path(temp_dir) / "out"
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(output_path))
+
+            self.assertEqual(2, completed.returncode)
+            self.assertIn("INP001_MISSING_INCIDENT", completed.stderr)
+            self.assertFalse(output_path.exists())
+
+    def test_no_telemetry_returns_inp002(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            bundle_path.mkdir()
+            write_valid_incident(bundle_path)
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(Path(temp_dir) / "out"))
+
+            self.assertEqual(2, completed.returncode)
+            self.assertIn("INP002_NO_TELEMETRY", completed.stderr)
+
+    def test_unsupported_entry_returns_inp003(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            bundle_path.mkdir()
+            write_valid_incident(bundle_path)
+            write_minimal_logs(bundle_path)
+            (bundle_path / "unexpected.txt").write_text("unsupported", encoding="utf-8")
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(Path(temp_dir) / "out"))
+
+            self.assertEqual(2, completed.returncode)
+            self.assertIn("INP003_UNSUPPORTED_ENTRY", completed.stderr)
+
+    def test_file_byte_limit_returns_lim001_before_schema_parse(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            bundle_path.mkdir()
+            (bundle_path / "incident.json").write_bytes(b"{" + (b"x" * ((5 * 1024 * 1024) + 1)))
+            write_minimal_logs(bundle_path)
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(Path(temp_dir) / "out"))
+
+            self.assertEqual(4, completed.returncode)
+            self.assertIn("LIM001_FILE_BYTES", completed.stderr)
+            self.assertIn("incident.json", completed.stderr)
+
+    def test_invalid_utf8_returns_inp004(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            bundle_path.mkdir()
+            write_valid_incident(bundle_path)
+            (bundle_path / "logs.jsonl").write_bytes(b"\xff")
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(Path(temp_dir) / "out"))
+
+            self.assertEqual(2, completed.returncode)
+            self.assertIn("INP004_ENCODING", completed.stderr)
+            self.assertIn("logs.jsonl", completed.stderr)
+
+    def test_invalid_timezone_returns_inp006(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            bundle_path.mkdir()
+            incident = dict(VALID_INCIDENT)
+            incident["timezone"] = "Mars/Base"
+            write_valid_incident(bundle_path, incident)
+            write_minimal_logs(bundle_path)
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(Path(temp_dir) / "out"))
+
+            self.assertEqual(2, completed.returncode)
+            self.assertIn("INP006_TIMEZONE", completed.stderr)
+
+    def test_invalid_window_returns_inp007(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            bundle_path.mkdir()
+            incident = dict(VALID_INCIDENT)
+            incident["baseline_window"] = {
+                "start": "2026-06-30T08:58:30+09:00",
+                "end": "2026-06-30T08:59:00+09:00",
+            }
+            write_valid_incident(bundle_path, incident)
+            write_minimal_logs(bundle_path)
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(Path(temp_dir) / "out"))
+
+            self.assertEqual(2, completed.returncode)
+            self.assertIn("INP007_WINDOW", completed.stderr)
+
+    def test_invalid_service_map_returns_inp009(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            bundle_path.mkdir()
+            write_valid_incident(bundle_path)
+            write_minimal_logs(bundle_path)
+            write_json(
+                bundle_path / "service-map.json",
+                {
+                    "services": [
+                        {
+                            "service_name": "quote-api",
+                            "service_path": "market_data",
+                            "dependency_type": "exchange",
+                            "dependencies": ["missing-service"],
+                        }
+                    ]
+                },
+            )
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(Path(temp_dir) / "out"))
+
+            self.assertEqual(2, completed.returncode)
+            self.assertIn("INP009_SERVICE_MAP", completed.stderr)
 
 
 if __name__ == "__main__":

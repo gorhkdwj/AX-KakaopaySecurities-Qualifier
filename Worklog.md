@@ -1523,3 +1523,61 @@
 - 다음 단계는 P4-05 번들 사전 검사입니다.
 - Notion 동기화 완료: Phase 4에 W-041 요약 추가 요청이 성공했고, fetch로 Phase 4 본문에 W-041 항목이 포함된 것을 확인했습니다.
 - Git 동기화 완료: P4-04 산출물과 1차 W-041 기록을 커밋 `5a0e89afbb750c8696870008174a57abcf40df99`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영했습니다.
+
+### W-042 · Phase 4 P4-05 번들 사전 검사
+
+**요청**
+
+- 다음 단계인 P4-05 번들 사전 검사를 진행합니다.
+
+**수행 작업**
+
+- `engineering:testing-strategy` Skill을 참고해 이번 단계를 입력 검증 실패 경계와 사전 검사 테스트로 한정했습니다.
+- `run_openbell.py`의 단계 표시를 P4-05로 올리고, 기존 CLI 진입점에 번들 사전 검사 게이트를 추가했습니다.
+- 번들 경로가 심볼릭 링크가 아닌 실제 디렉터리인지 확인하도록 했습니다.
+- 번들 최상위 허용 파일을 `incident.json`, `logs.jsonl`, `metrics.csv`, `service-map.json`으로 제한했습니다.
+- `incident.json` 필수, `logs.jsonl` 또는 `metrics.csv` 중 하나 이상 필수 조건을 구현했습니다.
+- 파일별 바이트 한도와 번들 전체 바이트 한도를 검사하도록 했습니다.
+- 모든 번들 파일이 UTF-8 또는 UTF-8 BOM으로 읽히는지 확인하도록 했습니다.
+- `incident.json`의 `schema_version`, `contract_version`, `incident_id`, `timezone`, `baseline_window`, `incident_window`, 선택 `thresholds`를 계약 기준으로 검사했습니다.
+- 선택 `service-map.json`이 있으면 `services`, `service_name`, `service_path`, `dependency_type`, `dependencies` 참조를 검사했습니다.
+- 성공 시 `openbell-cli-summary.json`에 파일명·크기·시간 창·서비스 맵 개수 같은 사전 검사 메타데이터만 기록하도록 했습니다.
+- `src/tests/test_run_openbell_cli.py`에 P4-05 실패 경계 테스트를 추가했습니다.
+- `src/skills/openbell-guard/SKILL.md`를 P4-05 현재 구현 범위와 한계에 맞게 갱신했습니다.
+- 이번 단계에서는 민감정보 마스킹, 로그·메트릭 레코드 파싱, 지표 계산, 최종 `analysis.json`과 `sanitization-report.md` 생성을 구현하지 않았습니다.
+
+**변경 파일**
+
+- 수정: `src/skills/openbell-guard/scripts/run_openbell.py`
+- 수정: `src/tests/test_run_openbell_cli.py`
+- 수정: `src/skills/openbell-guard/SKILL.md`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `python -m unittest .\src\tests\test_run_openbell_cli.py -v`를 실행해 CLI·사전 검사 테스트 13개가 모두 통과했습니다.
+- `python .\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\src\tests\fixtures\domestic-market-open-min\bundle --output .\out\p4-05-smoke`를 실행해 exit 0과 P4-05 `openbell-cli-summary.json` 생성을 확인했습니다.
+- smoke 결과는 `stage=P4-05`, `run_status=bundle_preflight_ready`, `analysis_json_created=false`, `sanitization_report_created=false`, `raw_telemetry_records_parsed=false`였습니다.
+- `python -m unittest discover -s .\src\tests -v`를 실행해 전체 테스트 25개가 모두 통과했습니다.
+- `python .\tools\preflight_check.py --quiet` 결과 `ok=5`, `warn=0`, `error=0`을 확인했습니다.
+- `python C:\Users\gorhk\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src`가 통과했습니다.
+- `python -X utf8 C:\Users\gorhk\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard`가 `Skill is valid!`로 통과했습니다.
+- `python -m py_compile .\src\skills\openbell-guard\scripts\run_openbell.py .\src\tests\test_contract_reference.py .\src\tests\test_domestic_market_open_min_fixture.py .\src\tests\test_run_openbell_cli.py .\tools\preflight_check.py`가 통과했습니다.
+- `rg -n -i "sk-[A-Za-z0-9]|password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|secret[_-]?key|계좌|account_number" .\src\skills\openbell-guard\scripts .\src\tests\test_run_openbell_cli.py` 결과 의심 항목이 없었습니다.
+- `git status --short --ignored`로 변경 대상과 ignored 대상(`logs/`, `out/`, Python 캐시)을 확인했습니다.
+- `logs/` 파일은 수동 편집하지 않았습니다.
+
+**트러블슈팅**
+
+- 새 T-ID 없음.
+- 이번 단계에서 오류는 발생하지 않았습니다.
+
+**결과**
+
+- P4-05가 완료됐습니다. 잘못된 입력 번들이 마스킹·파싱·분석 단계로 넘어가기 전 차단되는 기본 안전문이 생겼습니다.
+- 새로운 중요한 범위·아키텍처 결정은 없어 Decisionlog 새 항목은 만들지 않았습니다.
+- 현재 단계는 Phase 4의 P4-05/19이며, P4-04 실행 진입점 다음의 번들 계약 사전 검사 단계입니다.
+- 남은 태스크는 P4-06~P4-19 약 14단계이며, 예상 작업량은 높음입니다.
+- 다음 단계는 P4-06 민감정보 탐지·마스킹입니다.
+- Notion 동기화 완료: Phase 4에 W-042 요약 추가 요청이 성공했고, fetch로 Phase 4 본문에 W-042 항목이 포함된 것을 확인했습니다.
+- Git 동기화 대기: W-042 산출물과 기록을 커밋·push해야 합니다.
