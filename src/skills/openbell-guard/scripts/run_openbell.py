@@ -1,6 +1,6 @@
 """OpenBell Guard command-line entry point.
 
-P4-05 implements the shared CLI plus the first bundle preflight gate:
+P4-06 implements the shared CLI, bundle preflight gate, and first sanitizer:
 
 - parse ``--bundle`` and ``--output``;
 - verify that the bundle is an existing, non-symlink directory;
@@ -8,10 +8,11 @@ P4-05 implements the shared CLI plus the first bundle preflight gate:
 - enforce fixed file and bundle byte limits;
 - verify UTF-8/UTF-8-BOM readability;
 - validate the ``incident.json`` contract and optional ``service-map.json``.
+- create a masked working copy and ``sanitization-report.md``.
 
-It still does not mask inputs, parse telemetry records, compute metrics, or
-create the final ``analysis.json``. Those behaviors belong to later Phase 4
-steps and must keep using this entry point.
+It still does not parse telemetry records, compute metrics, or create the final
+``analysis.json``. Those behaviors belong to later Phase 4 steps and must keep
+using this entry point.
 """
 
 from __future__ import annotations
@@ -35,8 +36,10 @@ EXIT_CODES = {
     "output_validation_error": 5,
 }
 
-CLI_STAGE = "P4-05"
+CLI_STAGE = "P4-06"
 SUMMARY_FILENAME = "openbell-cli-summary.json"
+SANITIZED_BUNDLE_DIR = "sanitized-bundle"
+SANITIZATION_REPORT = "sanitization-report.md"
 SCHEMA_VERSION = "1.0"
 CONTRACT_VERSION = "1.0.0"
 
@@ -78,15 +81,57 @@ THRESHOLD_KEYS = frozenset(
         "ingestion_lag_p95_ms_max",
     }
 )
+SENSITIVE_PATTERNS = (
+    {
+        "type": "PRIVATE_KEY",
+        "pattern": re.compile(
+            r"-----BEGIN(?: [A-Z0-9]+)? PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z0-9]+)? PRIVATE KEY-----"
+        ),
+        "replacement": "[REDACTED:PRIVATE_KEY]",
+    },
+    {
+        "type": "BEARER_TOKEN",
+        "pattern": re.compile(r"(?i)\bAuthorization\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]+"),
+        "replacement": "Authorization: [REDACTED:BEARER_TOKEN]",
+    },
+    {
+        "type": "JWT",
+        "pattern": re.compile(r"\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
+        "replacement": "[REDACTED:JWT]",
+    },
+    {
+        "type": "SECRET",
+        "pattern": re.compile(
+            r"(?i)\b(api_key|access_token|secret|password|passwd|session_token|cookie)\b\s*[:=]\s*[\"']?([^\s,\"';}]+)"
+        ),
+        "replacement": "[REDACTED:SECRET]",
+    },
+    {
+        "type": "EMAIL",
+        "pattern": re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"),
+        "replacement": "[REDACTED:EMAIL]",
+    },
+    {
+        "type": "PHONE",
+        "pattern": re.compile(r"(?<!\d)(?:\+82[- ]?|0)(?:10|2|[3-6][1-5])[- ]?\d{3,4}[- ]?\d{4}(?!\d)"),
+        "replacement": "[REDACTED:PHONE]",
+    },
+    {
+        "type": "ACCOUNT",
+        "pattern": re.compile(r"(?i)(account(?:_no|_number)?|계좌(?:번호)?)\s*[:=]?\s*\d(?:[- ]?\d){7,15}"),
+        "replacement": "[REDACTED:ACCOUNT]",
+    },
+)
+SENSITIVE_TYPES = tuple(rule["type"] for rule in SENSITIVE_PATTERNS)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="run_openbell.py",
         description=(
-            "Prepare an OpenBell Guard run directory. P4-05 validates the CLI, "
-            "paths, bundle file contract, byte limits, and incident metadata; "
-            "telemetry analysis is implemented later."
+            "Prepare an OpenBell Guard run directory. P4-06 validates the CLI, "
+            "paths, bundle file contract, byte limits, incident metadata, and "
+            "creates a masked working copy; telemetry analysis is implemented later."
         ),
     )
     parser.add_argument(
@@ -507,11 +552,13 @@ def validate_service_map(payload: dict[str, Any]) -> tuple[dict[str, Any] | None
     return {"provided": True, "service_count": len(services)}, None
 
 
-def validate_bundle_preflight(bundle_path: Path) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+def validate_bundle_preflight(
+    bundle_path: Path,
+) -> tuple[dict[str, Any] | None, dict[str, str] | None, dict[str, Any] | None]:
     try:
         entries = list(bundle_path.iterdir())
     except OSError:
-        return None, issue_payload(
+        return None, None, issue_payload(
             exit_code=EXIT_CODES["input_error"],
             issue_code="INP003_UNSUPPORTED_ENTRY",
             message="The --bundle directory could not be listed.",
@@ -521,7 +568,7 @@ def validate_bundle_preflight(bundle_path: Path) -> tuple[dict[str, Any] | None,
     file_paths: dict[str, Path] = {}
     for entry in entries:
         if entry.name not in ALLOWED_BUNDLE_FILES or entry.is_symlink() or not entry.is_file():
-            return None, issue_payload(
+            return None, None, issue_payload(
                 exit_code=EXIT_CODES["input_error"],
                 issue_code="INP003_UNSUPPORTED_ENTRY",
                 message="The bundle contains an unsupported file, directory, or symbolic link.",
@@ -531,7 +578,7 @@ def validate_bundle_preflight(bundle_path: Path) -> tuple[dict[str, Any] | None,
         file_paths[entry.name] = entry
 
     if "incident.json" not in file_paths:
-        return None, issue_payload(
+        return None, None, issue_payload(
             exit_code=EXIT_CODES["input_error"],
             issue_code="INP001_MISSING_INCIDENT",
             message="incident.json is required.",
@@ -539,7 +586,7 @@ def validate_bundle_preflight(bundle_path: Path) -> tuple[dict[str, Any] | None,
             source_file="incident.json",
         )
     if "logs.jsonl" not in file_paths and "metrics.csv" not in file_paths:
-        return None, issue_payload(
+        return None, None, issue_payload(
             exit_code=EXIT_CODES["input_error"],
             issue_code="INP002_NO_TELEMETRY",
             message="At least one of logs.jsonl or metrics.csv is required.",
@@ -551,7 +598,7 @@ def validate_bundle_preflight(bundle_path: Path) -> tuple[dict[str, Any] | None,
         try:
             file_sizes[file_name] = path.stat().st_size
         except OSError:
-            return None, issue_payload(
+            return None, None, issue_payload(
                 exit_code=EXIT_CODES["input_error"],
                 issue_code="INP003_UNSUPPORTED_ENTRY",
                 message="A bundle file could not be inspected.",
@@ -559,7 +606,7 @@ def validate_bundle_preflight(bundle_path: Path) -> tuple[dict[str, Any] | None,
                 source_file=file_name,
             )
         if file_sizes[file_name] > FILE_BYTE_LIMITS[file_name]:
-            return None, issue_payload(
+            return None, None, issue_payload(
                 exit_code=EXIT_CODES["limit_exceeded"],
                 issue_code="LIM001_FILE_BYTES",
                 message="A bundle file exceeds its supported byte limit.",
@@ -569,7 +616,7 @@ def validate_bundle_preflight(bundle_path: Path) -> tuple[dict[str, Any] | None,
 
     total_bytes = sum(file_sizes.values())
     if total_bytes > BUNDLE_BYTE_LIMIT:
-        return None, issue_payload(
+        return None, None, issue_payload(
             exit_code=EXIT_CODES["limit_exceeded"],
             issue_code="LIM004_BUNDLE_BYTES",
             message="The bundle exceeds its supported total byte limit.",
@@ -580,28 +627,28 @@ def validate_bundle_preflight(bundle_path: Path) -> tuple[dict[str, Any] | None,
     for file_name, path in sorted(file_paths.items()):
         text, issue = read_utf8_text(path, file_name)
         if issue is not None:
-            return None, issue
+            return None, None, issue
         assert text is not None
         decoded_files[file_name] = text
 
     incident_payload, issue = load_json_object(decoded_files["incident.json"], "incident.json")
     if issue is not None:
-        return None, issue
+        return None, None, issue
     assert incident_payload is not None
     incident_summary, issue = validate_incident(incident_payload)
     if issue is not None:
-        return None, issue
+        return None, None, issue
     assert incident_summary is not None
 
     service_map_summary = {"provided": False, "service_count": 0}
     if "service-map.json" in decoded_files:
         service_map_payload, issue = load_json_object(decoded_files["service-map.json"], "service-map.json")
         if issue is not None:
-            return None, issue
+            return None, None, issue
         assert service_map_payload is not None
         service_map_summary, issue = validate_service_map(service_map_payload)
         if issue is not None:
-            return None, issue
+            return None, None, issue
         assert service_map_summary is not None
 
     return (
@@ -611,8 +658,159 @@ def validate_bundle_preflight(bundle_path: Path) -> tuple[dict[str, Any] | None,
             "incident": incident_summary,
             "service_map": service_map_summary,
         },
+        decoded_files,
         None,
     )
+
+
+def is_redacted_placeholder_match(match_text: str) -> bool:
+    return "[REDACTED:" in match_text
+
+
+def line_number_for_offset(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
+
+def find_sensitive_matches(
+    text: str, *, source_file: str = "<memory>", include_redacted: bool = True
+) -> list[dict[str, Any]]:
+    matches: list[dict[str, Any]] = []
+    for rule in SENSITIVE_PATTERNS:
+        pattern = rule["pattern"]
+        assert isinstance(pattern, re.Pattern)
+        secret_type = str(rule["type"])
+        for match in pattern.finditer(text):
+            if not include_redacted and is_redacted_placeholder_match(match.group(0)):
+                continue
+            matches.append(
+                {
+                    "type": secret_type,
+                    "source_file": source_file,
+                    "line": line_number_for_offset(text, match.start()),
+                }
+            )
+    return matches
+
+
+def replace_sensitive_match(secret_type: str, replacement: str, match: re.Match[str]) -> str:
+    match_text = match.group(0)
+    if is_redacted_placeholder_match(match_text):
+        return match_text
+
+    if secret_type == "SECRET":
+        value_start, value_end = match.span(2)
+        relative_start = value_start - match.start()
+        relative_end = value_end - match.start()
+        return f"{match_text[:relative_start]}{replacement}{match_text[relative_end:]}"
+
+    if secret_type == "ACCOUNT":
+        digit_match = re.search(r"\d", match_text)
+        if digit_match is None:
+            return match_text
+        return f"{match_text[: digit_match.start()]}{replacement}"
+
+    return replacement
+
+
+def sanitize_text(text: str, *, source_file: str) -> tuple[str, list[dict[str, Any]]]:
+    sanitized = text
+    findings: list[dict[str, Any]] = []
+
+    for rule in SENSITIVE_PATTERNS:
+        secret_type = str(rule["type"])
+        replacement = str(rule["replacement"])
+        pattern = rule["pattern"]
+        assert isinstance(pattern, re.Pattern)
+
+        for match in pattern.finditer(sanitized):
+            if is_redacted_placeholder_match(match.group(0)):
+                continue
+            findings.append(
+                {
+                    "type": secret_type,
+                    "source_file": source_file,
+                    "line": line_number_for_offset(sanitized, match.start()),
+                }
+            )
+
+        sanitized = pattern.sub(lambda match: replace_sensitive_match(secret_type, replacement, match), sanitized)
+
+    return sanitized, findings
+
+
+def summarize_sanitization(findings: list[dict[str, Any]]) -> dict[str, Any]:
+    by_type = []
+    for secret_type in SENSITIVE_TYPES:
+        typed_findings = [finding for finding in findings if finding["type"] == secret_type]
+        locations = sorted({f"{finding['source_file']}:L{finding['line']}" for finding in typed_findings})
+        by_type.append({"type": secret_type, "count": len(typed_findings), "locations": locations})
+    return {
+        "status": "success",
+        "total_redactions": len(findings),
+        "by_type": by_type,
+        "masked_bundle_dir": SANITIZED_BUNDLE_DIR,
+        "report_file": SANITIZATION_REPORT,
+    }
+
+
+def render_sanitization_report(summary: dict[str, Any]) -> str:
+    lines = [
+        "# Sanitization Report",
+        "",
+        f"- stage: {CLI_STAGE}",
+        f"- status: {summary['status']}",
+        f"- total_redactions: {summary['total_redactions']}",
+        "- note: 원값, 원값 일부, 해시와 절대경로는 기록하지 않습니다.",
+        "",
+        "| Type | Count | Locations |",
+        "|---|---:|---|",
+    ]
+    for item in summary["by_type"]:
+        locations = ", ".join(item["locations"]) if item["locations"] else "-"
+        lines.append(f"| {item['type']} | {item['count']} | {locations} |")
+    return "\n".join(lines) + "\n"
+
+
+def sanitize_bundle(
+    *, decoded_files: dict[str, str], output_path: Path
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    try:
+        sanitized_files: dict[str, str] = {}
+        findings: list[dict[str, Any]] = []
+        for file_name, text in sorted(decoded_files.items()):
+            sanitized_text, file_findings = sanitize_text(text, source_file=file_name)
+            sanitized_files[file_name] = sanitized_text
+            findings.extend(file_findings)
+
+        residues: list[dict[str, Any]] = []
+        for file_name, sanitized_text in sorted(sanitized_files.items()):
+            residues.extend(find_sensitive_matches(sanitized_text, source_file=file_name, include_redacted=False))
+        if residues:
+            first_residue = residues[0]
+            return None, issue_payload(
+                exit_code=EXIT_CODES["security_block"],
+                issue_code="SEC002_SENSITIVE_RESIDUE",
+                message="Sensitive pattern residue remained after masking.",
+                argument="bundle",
+                source_file=str(first_residue["source_file"]),
+            )
+
+        sanitized_dir = output_path / SANITIZED_BUNDLE_DIR
+        sanitized_dir.mkdir(parents=True, exist_ok=True)
+        for file_name, sanitized_text in sanitized_files.items():
+            (sanitized_dir / file_name).write_text(sanitized_text, encoding="utf-8", newline="")
+
+        summary = summarize_sanitization(findings)
+        (output_path / SANITIZATION_REPORT).write_text(render_sanitization_report(summary), encoding="utf-8")
+    except OSError:
+        return None, issue_payload(
+            exit_code=EXIT_CODES["security_block"],
+            issue_code="SEC001_SANITIZER_FAILURE",
+            message="The sanitizer could not create the masked working copy or report.",
+            argument="output",
+        )
+
+    return summary, None
 
 
 def path_overlaps_bundle(*, bundle_path: Path, output_path: Path) -> bool:
@@ -654,11 +852,13 @@ def validate_and_prepare_output(*, bundle_path: Path, output_path: Path) -> dict
     return None
 
 
-def success_payload(*, bundle_path: Path, preflight_summary: dict[str, Any]) -> dict[str, Any]:
+def success_payload(
+    *, bundle_path: Path, preflight_summary: dict[str, Any], sanitization_summary: dict[str, Any]
+) -> dict[str, Any]:
     return {
         "schema_version": "0.1",
         "stage": CLI_STAGE,
-        "run_status": "bundle_preflight_ready",
+        "run_status": "sanitized_preflight_ready",
         "exit_code": EXIT_CODES["ok"],
         "bundle": {
             "name": bundle_path.name,
@@ -669,9 +869,12 @@ def success_payload(*, bundle_path: Path, preflight_summary: dict[str, Any]) -> 
         },
         "outputs": {
             "summary_file": SUMMARY_FILENAME,
+            "sanitized_bundle_dir": SANITIZED_BUNDLE_DIR,
             "analysis_json_created": False,
-            "sanitization_report_created": False,
+            "sanitization_report_created": True,
+            "sanitization_report_file": SANITIZATION_REPORT,
         },
+        "sanitization": sanitization_summary,
         "implemented_scope": [
             "parse --bundle and --output",
             "validate bundle directory existence",
@@ -681,9 +884,12 @@ def success_payload(*, bundle_path: Path, preflight_summary: dict[str, Any]) -> 
             "validate UTF-8 readability",
             "validate incident metadata and windows",
             "validate service-map structure when provided",
+            "detect and redact seven sensitive-info pattern categories",
+            "write masked working copy",
+            "write sanitization-report.md without raw values",
+            "rescan masked working copy for sensitive residue",
         ],
         "deferred_scope": [
-            "secret masking",
             "telemetry record parsing",
             "metric calculation",
             "analysis.json generation",
@@ -717,18 +923,29 @@ def run(bundle_arg: str, output_arg: str) -> int:
         write_stderr_json(issue)
         return int(issue["exit_code"])
 
-    preflight_summary, issue = validate_bundle_preflight(bundle_path)
+    preflight_summary, decoded_files, issue = validate_bundle_preflight(bundle_path)
     if issue is not None:
         write_stderr_json(issue)
         return int(issue["exit_code"])
     assert preflight_summary is not None
+    assert decoded_files is not None
 
     issue = validate_and_prepare_output(bundle_path=bundle_path, output_path=output_path)
     if issue is not None:
         write_stderr_json(issue)
         return int(issue["exit_code"])
 
-    payload = success_payload(bundle_path=bundle_path, preflight_summary=preflight_summary)
+    sanitization_summary, issue = sanitize_bundle(decoded_files=decoded_files, output_path=output_path)
+    if issue is not None:
+        write_stderr_json(issue)
+        return int(issue["exit_code"])
+    assert sanitization_summary is not None
+
+    payload = success_payload(
+        bundle_path=bundle_path,
+        preflight_summary=preflight_summary,
+        sanitization_summary=sanitization_summary,
+    )
     issue = write_summary(output_path=output_path, payload=payload)
     if issue is not None:
         write_stderr_json(issue)

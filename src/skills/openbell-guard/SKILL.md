@@ -7,22 +7,22 @@ description: Analyze a synthetic or anonymized post-incident brokerage bundle fo
 
 OpenBell Guard는 카카오페이증권 AX 해커톤 제출물을 위한 Codex Skill입니다.
 
-현재 구현 상태는 Phase 4의 P4-05 번들 사전 검사 단계입니다. 플러그인 구조, 지표 계약 복사본, 최소 합성 fixture와 `run_openbell.py --bundle --output` 실행 입구가 있습니다. CLI는 번들의 허용 파일, 필수 파일, UTF-8, 파일 크기, `incident.json` 시간 창과 선택 `service-map.json` 구조를 검사합니다. 다만 아직 로그·메트릭 레코드를 파싱하거나, 민감정보를 마스킹하거나, 최종 `analysis.json`과 `sanitization-report.md`를 생성하지 않습니다.
+현재 구현 상태는 Phase 4의 P4-06 민감정보 탐지·마스킹 단계입니다. 플러그인 구조, 지표 계약 복사본, 최소 합성 fixture와 `run_openbell.py --bundle --output` 실행 입구가 있습니다. CLI는 번들의 허용 파일, 필수 파일, UTF-8, 파일 크기, `incident.json` 시간 창과 선택 `service-map.json` 구조를 검사한 뒤, 7개 민감정보 패턴을 마스킹한 `sanitized-bundle/`과 `sanitization-report.md`를 생성합니다. 다만 아직 로그·메트릭 레코드를 파싱하거나, 지표를 계산하거나, 최종 `analysis.json`을 생성하지 않습니다.
 
 ## 현재 사용 가능 범위
 
 - 플러그인 이름과 Skill 이름은 `openbell-guard`로 고정합니다.
 - 분석 대상은 합성 또는 익명화된 사고 분석 번들로 제한합니다.
 - 실제 고객정보, 계좌정보, API 키, 토큰, 비밀번호가 포함된 원본 운영 데이터는 받지 않습니다.
-- 현재 단계에서는 CLI 경로 점검과 번들 사전 검사만 수행할 수 있습니다.
+- 현재 단계에서는 CLI 경로 점검, 번들 사전 검사와 민감정보 마스킹 작업본 생성을 수행할 수 있습니다.
 - 실행 예시는 다음과 같습니다.
 
 ```bash
 python src/skills/openbell-guard/scripts/run_openbell.py --bundle src/tests/fixtures/domestic-market-open-min/bundle --output out/domestic-market-open-min
 ```
 
-- 성공하면 `openbell-cli-summary.json`만 생성합니다. 이 파일은 P4-05 사전 검사 결과이며 최종 분석 산출물이 아닙니다.
-- 사용자가 분석 실행을 요청하면, 아직 분석기는 구현 전이며 다음 단계에서 민감정보 마스킹, 파싱과 지표 계산을 순차 구현한다고 안내합니다.
+- 성공하면 `openbell-cli-summary.json`, `sanitized-bundle/`, `sanitization-report.md`를 생성합니다. 이 파일들은 P4-06 사전 처리 결과이며 최종 분석 산출물인 `analysis.json`은 아닙니다.
+- 사용자가 분석 실행을 요청하면, 아직 분석기는 구현 전이며 다음 단계에서 파싱과 지표 계산을 순차 구현한다고 안내합니다.
 
 ## 예정된 실행 흐름
 

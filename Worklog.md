@@ -1581,3 +1581,64 @@
 - 다음 단계는 P4-06 민감정보 탐지·마스킹입니다.
 - Notion 동기화 완료: Phase 4에 W-042 요약 추가 요청이 성공했고, fetch로 Phase 4 본문에 W-042 항목이 포함된 것을 확인했습니다.
 - Git 동기화 완료: P4-05 산출물과 1차 W-042 기록을 커밋 `2f9ea74ece33639f7929faaa108416c4fe2ac8e9`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영했습니다.
+
+### W-043 · Phase 4 P4-06 민감정보 탐지·마스킹
+
+**요청**
+
+- 다음 작업을 이어서 진행합니다. 현재 순서상 P4-06 민감정보 탐지·마스킹을 구현합니다.
+
+**수행 작업**
+
+- `engineering:testing-strategy` Skill을 참고해 이번 단계를 보안 경계와 데이터 무결성 테스트로 한정했습니다.
+- 계약 10.1의 7개 민감정보 패턴을 `run_openbell.py`에 구현했습니다.
+- 탐지 범주는 PEM private key, Bearer token, JWT 후보, 비밀 key-value, 이메일, 한국 전화번호, 계좌 식별값입니다.
+- 원본 번들은 수정하지 않고, output 아래 `sanitized-bundle/`에 마스킹된 작업본을 생성하도록 했습니다.
+- `sanitization-report.md`를 생성하되 원값, 원값 일부, 해시, 절대경로를 기록하지 않도록 했습니다.
+- 마스킹 작업본을 다시 검사해 민감정보 패턴 잔존 여부를 확인하도록 했습니다.
+- 이미 승인된 `[REDACTED:...]` 표식은 원문 민감정보 잔존으로 세지 않는 기준을 D-026으로 기록했습니다.
+- `openbell-cli-summary.json`의 단계와 상태를 `P4-06`, `sanitized_preflight_ready`로 갱신했습니다.
+- `src/tests/test_run_openbell_cli.py`에 seeded synthetic secret 7종 마스킹, 원본 파일 무변경, report 원값 미기록, redaction placeholder 재스캔 예외 테스트를 추가했습니다.
+- `src/skills/openbell-guard/SKILL.md`를 P4-06 현재 구현 범위와 한계에 맞게 갱신했습니다.
+- 이번 단계에서는 로그·메트릭 레코드 파싱, 지표 계산, 최종 `analysis.json` 생성을 구현하지 않았습니다.
+
+**변경 파일**
+
+- 수정: `src/skills/openbell-guard/scripts/run_openbell.py`
+- 수정: `src/tests/test_run_openbell_cli.py`
+- 수정: `src/skills/openbell-guard/SKILL.md`
+- 수정: `Decisionlog.md`
+- 수정: `Troubleshootinglog.md`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `python -m unittest .\src\tests\test_run_openbell_cli.py -v`를 실행해 CLI·사전 검사·마스킹 테스트 15개가 모두 통과했습니다.
+- `python .\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\src\tests\fixtures\domestic-market-open-min\bundle --output .\out\p4-06-smoke`를 실행해 exit 0, `sanitized-bundle/`, `sanitization-report.md`, `openbell-cli-summary.json` 생성을 확인했습니다.
+- smoke 결과는 `stage=P4-06`, `run_status=sanitized_preflight_ready`, `analysis_json_created=false`, `sanitization_report_created=true`, `raw_telemetry_records_parsed=false`였습니다.
+- seeded synthetic secret 테스트에서 7개 원문 값이 마스킹 작업본, report와 summary에 남지 않음을 확인했습니다.
+- `python -m unittest discover -s .\src\tests -v`를 실행해 전체 테스트 27개가 모두 통과했습니다.
+- `python .\tools\preflight_check.py --quiet` 결과 `ok=5`, `warn=0`, `error=0`을 확인했습니다.
+- `python C:\Users\gorhk\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src`가 통과했습니다.
+- `python -X utf8 C:\Users\gorhk\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard`가 `Skill is valid!`로 통과했습니다.
+- `python -m py_compile .\src\skills\openbell-guard\scripts\run_openbell.py .\src\tests\test_contract_reference.py .\src\tests\test_domestic_market_open_min_fixture.py .\src\tests\test_run_openbell_cli.py .\tools\preflight_check.py`가 통과했습니다.
+- `run_openbell.py`의 `find_sensitive_matches` 함수를 import해 `out/p4-06-smoke` 전체 산출물을 재검사했고, `no_sensitive_residue` 결과로 민감정보 패턴 잔존이 없음을 확인했습니다.
+- `rg -n -i "sk-[A-Za-z0-9]|password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|secret[_-]?key|계좌|account_number" .\src\skills\openbell-guard\scripts .\src\skills\openbell-guard\SKILL.md` 결과는 실제 비밀값이 아니라 `SKILL.md`의 금지 설명 문구와 `run_openbell.py`의 보안 정규식 정의만 잡았습니다.
+- `git status --short --ignored`로 변경 대상과 ignored 대상(`logs/`, `out/`, Python 캐시)을 확인했습니다.
+- `logs/` 파일은 수동 편집하지 않았습니다.
+
+**트러블슈팅**
+
+- T-006: P4-06 단계명 상승 후 성공 smoke 테스트 기대값을 `P4-05`에서 `P4-06`으로 갱신하지 않아 1개 테스트가 실패했습니다. 기대값을 `stage=P4-06`, `run_status=sanitized_preflight_ready`, `sanitization_report_created=true`로 수정해 해결했습니다.
+- T-007: Notion에 D-026 링크를 추가할 때 fetch 결과의 `<page>` 태그를 update 입력에 그대로 사용해 실패했습니다. 일반 Markdown 링크로 바꿔 재시도했고, Phase 4 본문과 D-026 페이지 fetch로 반영을 확인했습니다.
+- T-008: 민감정보 잔존 확인을 위해 PowerShell과 임시 Python 명령에 정규식을 다시 작성하다 인용·정규식 컴파일 오류가 발생했습니다. 구현 함수 `find_sensitive_matches`를 import해 같은 기준으로 재검사하는 방식으로 바꿔 해결했습니다.
+
+**결과**
+
+- P4-06이 완료됐습니다. 원본 번들을 직접 분석으로 넘기기 전, 마스킹 작업본과 값 노출 없는 `sanitization-report.md`를 만드는 안전 경계가 생겼습니다.
+- 보안 재검사 기준에 대한 D-026 결정을 추가했습니다.
+- 현재 단계는 Phase 4의 P4-06/19이며, P4-05 번들 사전 검사 다음의 민감정보 차단 단계입니다.
+- 남은 태스크는 P4-07~P4-19 약 13단계이며, 예상 작업량은 높음입니다.
+- 다음 단계는 P4-07 행 단위 파서입니다.
+- Notion 동기화 완료: Phase 4에 W-043 요약을 추가하고 D-026 결정 페이지를 생성했습니다. fetch로 Phase 4 본문에 W-043과 D-026 링크가 포함된 것과 D-026 페이지 본문을 확인했습니다. D-026 URL은 `https://app.notion.com/p/38e05ea68bfc8186b95dd5ecd03bee4b`입니다.
+- Git 동기화 대기: W-043 산출물과 기록을 커밋·push해야 합니다.

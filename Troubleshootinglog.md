@@ -204,3 +204,85 @@
 - manifest 변경 후에는 `python C:\Users\gorhk\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src`를 실행합니다.
 - Windows에서 Skill 검증은 `python -X utf8 C:\Users\gorhk\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard`로 실행합니다.
 - `tools/preflight_check.py`가 공식 검증 전 기본 manifest 필수 필드를 사전 점검합니다.
+
+### T-006 · 단계명 상승 후 테스트 기대값 갱신 누락
+
+**발생 단계**
+
+- Phase/P4 단계: Phase 4 / P4-06 민감정보 탐지·마스킹
+- 관련 W-ID: W-043
+
+**증상**
+
+- P4-06 구현 후 `python -m unittest .\src\tests\test_run_openbell_cli.py -v` 실행에서 1개 테스트가 실패했습니다.
+- 실패 테스트는 `test_success_creates_output_summary_without_analysis_outputs`였고, 실제 출력의 `stage`는 `P4-06`인데 테스트 기대값은 이전 단계인 `P4-05`로 남아 있었습니다.
+
+**확인한 원인**
+
+- `run_openbell.py`의 단계와 상태를 P4-06 기준으로 올렸지만, P4-05에서 작성된 성공 smoke 테스트 기대값을 함께 갱신하지 않았습니다.
+- 기능 오류라기보다 단계 상태 필드 변경에 따른 테스트 정합성 누락이었습니다.
+
+**조치**
+
+- 성공 smoke 테스트의 기대값을 `stage=P4-06`, `run_status=sanitized_preflight_ready`, `sanitization_report_created=true`로 갱신했습니다.
+- `sanitized-bundle/logs.jsonl`과 `sanitization-report.md` 생성 확인도 추가했습니다.
+- 수정 후 P4-06 CLI 테스트 15개와 전체 unittest 27개가 모두 통과했습니다.
+
+**재발 방지·후속 조치**
+
+- 단계가 P4-07, P4-08처럼 올라갈 때는 구현 상수뿐 아니라 성공 smoke 테스트의 `stage`, `run_status`, 생성 산출물 기대값을 함께 확인합니다.
+- 단계별 상태 변경은 기능 추가와 별도로 회귀 테스트 기대값 갱신 항목으로 Worklog에 적습니다.
+
+### T-007 · Notion update_content에서 `<page>` 태그를 신규 참조로 삽입하려다 실패
+
+**발생 단계**
+
+- Phase/P4 단계: Phase 4 / P4-06 Notion 동기화
+- 관련 W-ID: W-043
+
+**증상**
+
+- Phase 4 페이지에 W-043 요약과 D-026 링크를 추가할 때 `<page url="...">...</page>` 태그를 직접 넣은 `insert_content` 요청이 실패했습니다.
+- Notion 도구는 기존 페이지를 새로 만들거나 참조하기 위해 `<page>` 태그를 쓰지 말고, inline reference는 `<mention-page>` 또는 일반 링크를 쓰라고 반환했습니다.
+
+**확인한 원인**
+
+- Notion fetch 결과에는 기존 child page가 `<page>` 태그로 보이지만, update 요청에서 이 태그를 새로 삽입하는 것은 허용되지 않습니다.
+- fetch 표현 형식과 update 입력 형식을 혼동했습니다.
+
+**조치**
+
+- W-043 본문에서 D-026 참조를 일반 Markdown 링크로 바꿔 다시 `insert_content`를 실행했습니다.
+- 재시도는 성공했고, fetch로 Phase 4 본문과 D-026 페이지 생성을 확인했습니다.
+
+**재발 방지·후속 조치**
+
+- Notion 페이지 본문에 기존 페이지를 새로 참조할 때는 일반 Markdown 링크 또는 `<mention-page>`를 사용합니다.
+- fetch 결과에 보이는 `<page>` 태그는 “기존 child page 표현”으로만 해석하고, update 입력에 그대로 복사하지 않습니다.
+
+### T-008 · 임시 민감정보 잔존 스캔 명령의 PowerShell·정규식 인용 오류
+
+**발생 단계**
+
+- Phase/P4 단계: Phase 4 / P4-06 민감정보 탐지·마스킹 최종 검증
+- 관련 W-ID: W-043
+
+**증상**
+
+- `out/p4-06-smoke` 산출물에 민감정보가 남지 않았는지 추가 확인하려고 PowerShell에서 여러 정규식을 직접 조합한 `rg` 명령을 실행했으나, PowerShell 파서 오류가 발생했습니다.
+- 이어서 임시 Python here-string으로 같은 정규식을 다시 작성했지만, 수동 전사한 패턴 일부가 잘못되어 `re.error: nothing to repeat` 컴파일 오류가 발생했습니다.
+
+**확인한 원인**
+
+- 구현 코드에 이미 존재하는 민감정보 탐지 함수를 재사용하지 않고, 복잡한 정규식을 셸 명령에 다시 입력하면서 PowerShell 인용 규칙과 정규식 문법이 섞였습니다.
+- 제품 코드의 마스킹 로직 오류가 아니라, 검증용 임시 명령 작성 방식의 오류였습니다.
+
+**조치**
+
+- 임시 정규식을 폐기하고 `run_openbell.py`의 `find_sensitive_matches` 함수를 직접 import해 `out/p4-06-smoke` 전체 파일을 재검사했습니다.
+- 재검사 결과 `no_sensitive_residue`가 출력되어 마스킹 산출물에 민감정보 패턴 잔존이 없음을 확인했습니다.
+
+**재발 방지·후속 조치**
+
+- 보안 정규식처럼 복잡하고 제품 코드와 일치해야 하는 검증은 셸에서 패턴을 다시 작성하지 않고, 구현 함수 또는 공용 helper를 재사용합니다.
+- PowerShell에서 긴 정규식 묶음을 직접 조합해야 하는 상황은 피하고, 필요한 경우 짧은 Python 검증 스크립트로 분리해 먼저 컴파일 가능성을 확인합니다.

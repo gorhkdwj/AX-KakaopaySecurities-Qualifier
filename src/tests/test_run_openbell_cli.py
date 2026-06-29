@@ -50,6 +50,16 @@ VALID_INCIDENT = {
     "thresholds": {"market_data": {"error_rate_pct_max": 50.0}},
 }
 
+SEEDED_SECRET_VALUES = [
+    "PRIVATEKEYLINE",
+    "bearerTOKEN123",
+    "abcdefghij.klmnopqrst.uvwxyzABCD",
+    "plainsecretvalue",
+    "analyst@example.com",
+    "010-1234-5678",
+    "123-456-789012",
+]
+
 
 def load_run_openbell_module():
     spec = importlib.util.spec_from_file_location("run_openbell", SCRIPT_PATH)
@@ -82,6 +92,20 @@ def write_minimal_logs(bundle_path: Path) -> None:
     (bundle_path / "logs.jsonl").write_text("{}\n", encoding="utf-8")
 
 
+def write_seeded_secret_logs(bundle_path: Path) -> None:
+    message = (
+        "-----BEGIN PRIVATE KEY-----\\nPRIVATEKEYLINE\\n-----END PRIVATE KEY----- "
+        "Authorization: Bearer bearerTOKEN123 "
+        "abcdefghij.klmnopqrst.uvwxyzABCD "
+        "api_key=plainsecretvalue "
+        "analyst@example.com "
+        "010-1234-5678 "
+        "account_no: 123-456-789012"
+    )
+    row = {"message": message}
+    (bundle_path / "logs.jsonl").write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 class RunOpenBellCliTest(unittest.TestCase):
     def test_exit_code_skeleton_is_explicit(self) -> None:
         module = load_run_openbell_module()
@@ -106,14 +130,16 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertTrue(summary_path.exists())
 
             payload = json.loads(summary_path.read_text(encoding="utf-8"))
-            self.assertEqual("P4-05", payload["stage"])
-            self.assertEqual("bundle_preflight_ready", payload["run_status"])
+            self.assertEqual("P4-06", payload["stage"])
+            self.assertEqual("sanitized_preflight_ready", payload["run_status"])
             self.assertFalse(payload["bundle"]["raw_telemetry_records_parsed"])
             self.assertFalse(payload["bundle"]["raw_excerpts_emitted"])
             self.assertFalse(payload["outputs"]["analysis_json_created"])
-            self.assertFalse(payload["outputs"]["sanitization_report_created"])
+            self.assertTrue(payload["outputs"]["sanitization_report_created"])
             self.assertEqual("domestic-market-open-min", payload["bundle"]["preflight"]["incident"]["incident_id"])
             self.assertEqual(4, len(payload["bundle"]["preflight"]["files"]))
+            self.assertTrue((output_path / "sanitized-bundle" / "logs.jsonl").exists())
+            self.assertTrue((output_path / "sanitization-report.md").exists())
 
             serialized = json.dumps(payload, ensure_ascii=False)
             self.assertNotIn(str(FIXTURE_BUNDLE), serialized)
@@ -270,6 +296,66 @@ class BundlePreflightValidationTest(unittest.TestCase):
 
             self.assertEqual(2, completed.returncode)
             self.assertIn("INP009_SERVICE_MAP", completed.stderr)
+
+
+class SanitizationTest(unittest.TestCase):
+    def test_seeded_sensitive_values_are_redacted_in_working_copy_and_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            output_path = Path(temp_dir) / "out"
+            bundle_path.mkdir()
+            write_valid_incident(bundle_path)
+            write_seeded_secret_logs(bundle_path)
+            original_logs = (bundle_path / "logs.jsonl").read_text(encoding="utf-8")
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(output_path))
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            self.assertEqual(original_logs, (bundle_path / "logs.jsonl").read_text(encoding="utf-8"))
+
+            summary = json.loads((output_path / "openbell-cli-summary.json").read_text(encoding="utf-8"))
+            self.assertEqual("P4-06", summary["stage"])
+            self.assertTrue(summary["outputs"]["sanitization_report_created"])
+            self.assertFalse(summary["outputs"]["analysis_json_created"])
+            self.assertEqual(7, summary["sanitization"]["total_redactions"])
+
+            sanitized_logs_path = output_path / "sanitized-bundle" / "logs.jsonl"
+            sanitized_logs = sanitized_logs_path.read_text(encoding="utf-8")
+            report = (output_path / "sanitization-report.md").read_text(encoding="utf-8")
+            combined_outputs = sanitized_logs + "\n" + report + "\n" + json.dumps(summary, ensure_ascii=False)
+
+            for raw_value in SEEDED_SECRET_VALUES:
+                self.assertNotIn(raw_value, combined_outputs)
+
+            for marker in [
+                "[REDACTED:PRIVATE_KEY]",
+                "Authorization: [REDACTED:BEARER_TOKEN]",
+                "[REDACTED:JWT]",
+                "[REDACTED:SECRET]",
+                "[REDACTED:EMAIL]",
+                "[REDACTED:PHONE]",
+                "[REDACTED:ACCOUNT]",
+            ]:
+                self.assertIn(marker, sanitized_logs)
+
+            for secret_type in [
+                "PRIVATE_KEY",
+                "BEARER_TOKEN",
+                "JWT",
+                "SECRET",
+                "EMAIL",
+                "PHONE",
+                "ACCOUNT",
+            ]:
+                self.assertIn(secret_type, report)
+
+            self.assertIn("logs.jsonl:L1", report)
+            self.assertNotIn(str(bundle_path), report)
+
+    def test_redacted_secret_placeholder_is_not_counted_as_sensitive_residue(self) -> None:
+        module = load_run_openbell_module()
+        matches = module.find_sensitive_matches("api_key=[REDACTED:SECRET]", include_redacted=False)
+        self.assertEqual([], matches)
 
 
 if __name__ == "__main__":
