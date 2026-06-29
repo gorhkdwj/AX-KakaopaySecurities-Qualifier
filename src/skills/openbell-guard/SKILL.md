@@ -7,7 +7,7 @@ description: Analyze a synthetic or anonymized post-incident brokerage bundle fo
 
 OpenBell Guard는 카카오페이증권 AX 해커톤 제출물을 위한 Codex Skill입니다.
 
-현재 구현 상태는 Phase 4의 P4-12 메트릭 fallback과 CPU·메모리 맥락 지표 단계입니다. 플러그인 구조, 지표 계약 복사본, 최소 합성 fixture와 `run_openbell.py --bundle --output` 실행 입구가 있습니다.
+현재 구현 상태는 Phase 4의 P4-13 evidence·claim 구성 단계입니다. 플러그인 구조, 지표 계약 복사본, 최소 합성 fixture와 `run_openbell.py --bundle --output` 실행 입구가 있습니다.
 
 ## 현재 사용 가능한 범위
 
@@ -22,7 +22,8 @@ OpenBell Guard는 카카오페이증권 AX 해커톤 제출물을 위한 Codex S
 - CLI는 `metrics.csv`의 CPU·메모리 percent 표본을 M-015 맥락 지표로 집계해 `metric-summary.json`의 `context_metrics`에 보존합니다.
 - CLI는 메트릭 fallback에서 같은 버킷의 `error_count > request_count`가 발견되면 `MET001_COUNT_INCONSISTENT`로 기록하고 해당 요청·오류 집계를 무효화합니다.
 - CLI는 설정된 임계치로 버킷 상태, 서비스 경로 상태, 장애 시작과 회복 시각을 판정해 `state-summary.json`을 생성합니다.
-- 아직 최종 분석 산출물인 `analysis.json`, evidence, claim, Markdown 보고서는 생성하지 않습니다.
+- CLI는 확인된 사실, 원인 가설과 판단 불가 항목을 근거 ID와 연결해 `evidence-summary.json`을 생성합니다.
+- 아직 최종 분석 산출물인 `analysis.json`과 Markdown 보고서는 생성하지 않습니다.
 
 ## 실행 예시
 
@@ -39,8 +40,9 @@ python src/skills/openbell-guard/scripts/run_openbell.py --bundle src/tests/fixt
 - `bucket-summary.json`
 - `metric-summary.json`
 - `state-summary.json`
+- `evidence-summary.json`
 
-이 산출물들은 P4-12 중간 분석 결과입니다. 최종 제출용 보고서 기준 산출물인 `analysis.json`은 아직 생성하지 않습니다.
+이 산출물들은 P4-13 중간 분석 결과입니다. 최종 제출용 보고서 기준 산출물인 `analysis.json`은 아직 생성하지 않습니다.
 
 ## 기본 지표 계산 기준
 
@@ -82,6 +84,15 @@ python src/skills/openbell-guard/scripts/run_openbell.py --bundle src/tests/fixt
 - 장애 시작 후 `healthy` 버킷이 2개 연속이면 첫 번째 healthy 버킷을 `recovery_time`으로 기록합니다.
 - 이 판정은 입력 번들의 사용자 정의 임계치 기준이며, 카카오페이증권의 실제 내부 SLO 또는 공식 장애 판정을 의미하지 않습니다.
 
+## evidence·claim 기준
+
+- `evidence-summary.json`은 `incident`, `log`, `metric`, `service_map` 근거를 `E-001` 형식 ID로 기록합니다.
+- `confirmed_fact` claim은 하나 이상의 존재하는 evidence ID를 참조합니다.
+- `hypothesis` claim은 지지 근거, 반대 근거, 추가 필요 데이터와 `high`, `medium`, `low`, `unknown` 중 하나의 질적 신뢰도를 가집니다.
+- `unknown` claim은 현재 입력만으로 확정할 수 없는 내용을 `missing_data`와 함께 기록합니다.
+- 로그 원문 메시지를 그대로 펼치지 않고, 계산된 요약과 논리 위치만 근거로 남깁니다.
+- CPU·메모리 값은 맥락 근거로 사용할 수 있지만, 단독으로 자원 포화나 근본 원인을 확정하지 않습니다.
+
 ## 안전 원칙
 
 - OpenBell Guard는 읽기 전용 분석 도구입니다.
@@ -91,4 +102,4 @@ python src/skills/openbell-guard/scripts/run_openbell.py --bundle src/tests/fixt
 
 ## 다음 구현 예정 범위
 
-다음 단계에서는 evidence·claim, 최종 `analysis.json`, 파이프라인 실행시간·Python 추적 메모리 benchmark를 순차적으로 구현합니다.
+다음 단계에서는 최종 `analysis.json`, 출력 검증기, 보고서 템플릿, 파이프라인 실행시간·Python 추적 메모리 benchmark를 순차적으로 구현합니다.

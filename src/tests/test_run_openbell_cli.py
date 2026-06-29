@@ -1,8 +1,8 @@
-"""CLI, bundle-preflight, sanitizer, row-parser, bucket, metric, and state tests for OpenBell Guard.
+"""CLI, bundle-preflight, sanitizer, row-parser, bucket, metric, state, and claim tests.
 
-P4-12 keeps the shared command-line entry point and adds metrics-source fallback,
-M-015 CPU/memory context metrics, and MET001 count consistency handling on top of
-state judgment. The script still must not create the final analysis outputs.
+P4-13 keeps the shared command-line entry point and adds an evidence/claim
+summary on top of metric and state summaries. The script still must not create
+the final analysis outputs.
 """
 
 from __future__ import annotations
@@ -196,8 +196,8 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertTrue(summary_path.exists())
 
             payload = json.loads(summary_path.read_text(encoding="utf-8"))
-            self.assertEqual("P4-12", payload["stage"])
-            self.assertEqual("context_metrics_ready", payload["run_status"])
+            self.assertEqual("P4-13", payload["stage"])
+            self.assertEqual("evidence_claim_ready", payload["run_status"])
             self.assertFalse(payload["bundle"]["raw_telemetry_records_parsed"])
             self.assertTrue(payload["bundle"]["sanitized_telemetry_records_parsed"])
             self.assertFalse(payload["bundle"]["raw_excerpts_emitted"])
@@ -207,6 +207,7 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertTrue(payload["outputs"]["bucket_summary_created"])
             self.assertTrue(payload["outputs"]["metric_summary_created"])
             self.assertTrue(payload["outputs"]["state_summary_created"])
+            self.assertTrue(payload["outputs"]["evidence_summary_created"])
             self.assertEqual("domestic-market-open-min", payload["bundle"]["preflight"]["incident"]["incident_id"])
             self.assertEqual(4, len(payload["bundle"]["preflight"]["files"]))
             self.assertTrue((output_path / "sanitized-bundle" / "logs.jsonl").exists())
@@ -215,6 +216,7 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertTrue((output_path / "bucket-summary.json").exists())
             self.assertTrue((output_path / "metric-summary.json").exists())
             self.assertTrue((output_path / "state-summary.json").exists())
+            self.assertTrue((output_path / "evidence-summary.json").exists())
             self.assertEqual("logs.jsonl", payload["telemetry"]["primary_telemetry"])
             self.assertEqual(9, payload["telemetry"]["record_counts"]["total"]["physical_record_count"])
             self.assertEqual(9, payload["telemetry"]["record_counts"]["total"]["accepted_record_count"])
@@ -246,6 +248,9 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertEqual("complete", payload["state"]["run_status"])
             self.assertEqual({"breach": 1, "healthy": 2}, payload["state"]["bucket_state_counts"])
             self.assertEqual({"degradation_observed": 1}, payload["state"]["path_status_counts"])
+            self.assertGreaterEqual(payload["evidence"]["claim_counts"]["confirmed_fact"], 1)
+            self.assertGreaterEqual(payload["evidence"]["claim_counts"]["hypothesis"], 1)
+            self.assertGreaterEqual(payload["evidence"]["claim_counts"]["unknown"], 1)
 
             serialized = json.dumps(payload, ensure_ascii=False)
             self.assertNotIn(str(FIXTURE_BUNDLE), serialized)
@@ -420,7 +425,7 @@ class SanitizationTest(unittest.TestCase):
             self.assertEqual(original_logs, (bundle_path / "logs.jsonl").read_text(encoding="utf-8"))
 
             summary = json.loads((output_path / "openbell-cli-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-12", summary["stage"])
+            self.assertEqual("P4-13", summary["stage"])
             self.assertTrue(summary["outputs"]["sanitization_report_created"])
             self.assertFalse(summary["outputs"]["analysis_json_created"])
             self.assertEqual(7, summary["sanitization"]["total_redactions"])
@@ -625,7 +630,7 @@ class BucketSummaryTest(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             bucket_summary = json.loads((output_path / "bucket-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-12", bucket_summary["stage"])
+            self.assertEqual("P4-13", bucket_summary["stage"])
             self.assertEqual("UTC", bucket_summary["time_basis"])
             self.assertEqual("Asia/Seoul", bucket_summary["display_timezone"])
             self.assertEqual(["service_path", "bucket_start_utc"], bucket_summary["sort_order"])
@@ -691,7 +696,7 @@ class BasicMetricSummaryTest(unittest.TestCase):
             metric_summary = json.loads((output_path / "metric-summary.json").read_text(encoding="utf-8"))
             expected_analysis = json.loads(EXPECTED_ANALYSIS.read_text(encoding="utf-8"))
 
-            self.assertEqual("P4-12", metric_summary["stage"])
+            self.assertEqual("P4-13", metric_summary["stage"])
             self.assertEqual("logs.jsonl", metric_summary["primary_telemetry"])
             self.assertEqual(
                 [
@@ -1250,7 +1255,7 @@ class StateSummaryTest(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             state_summary = json.loads((output_path / "state-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-12", state_summary["stage"])
+            self.assertEqual("P4-13", state_summary["stage"])
             self.assertEqual("complete", state_summary["run"]["status"])
             self.assertEqual(0, state_summary["run"]["exit_code"])
             self.assertEqual([], state_summary["run"]["limitations"])
@@ -1384,6 +1389,82 @@ class StateSummaryTest(unittest.TestCase):
                 state_summary["run"]["limitations"],
             )
             self.assertEqual("threshold_missing", state_summary["bucket_states"][0]["unknown_reasons"][0]["reason_code"])
+
+
+class EvidenceClaimSummaryTest(unittest.TestCase):
+    def test_fixture_evidence_summary_has_valid_claim_references(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "openbell-out"
+
+            completed = run_cli("--bundle", str(FIXTURE_BUNDLE), "--output", str(output_path))
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            evidence_summary = json.loads((output_path / "evidence-summary.json").read_text(encoding="utf-8"))
+            self.assertEqual("P4-13", evidence_summary["stage"])
+            self.assertEqual("complete", evidence_summary["status"])
+            self.assertFalse(evidence_summary["raw_excerpts_emitted"])
+            self.assertGreaterEqual(evidence_summary["evidence_count"], 4)
+            self.assertGreaterEqual(evidence_summary["claim_counts"]["confirmed_fact"], 2)
+            self.assertGreaterEqual(evidence_summary["claim_counts"]["hypothesis"], 1)
+            self.assertGreaterEqual(evidence_summary["claim_counts"]["unknown"], 1)
+
+            evidence_ids = {item["evidence_id"] for item in evidence_summary["evidence"]}
+            self.assertEqual(len(evidence_ids), evidence_summary["evidence_count"])
+            for evidence in evidence_summary["evidence"]:
+                self.assertFalse(Path(evidence["source_file"]).is_absolute())
+                self.assertIn(evidence["source_type"], {"incident", "log", "metric", "service_map"})
+
+            claim_ids = {item["claim_id"] for item in evidence_summary["claims"]}
+            self.assertEqual(len(claim_ids), len(evidence_summary["claims"]))
+            for claim in evidence_summary["claims"]:
+                self.assertEqual(f"[{claim['claim_id']}]", claim["report_claim_marker"])
+                if claim["claim_type"] == "confirmed_fact":
+                    self.assertTrue(claim["evidence_refs"])
+                    self.assertTrue(set(claim["evidence_refs"]).issubset(evidence_ids))
+                elif claim["claim_type"] == "hypothesis":
+                    self.assertTrue(claim["supporting_evidence_refs"])
+                    self.assertTrue(set(claim["supporting_evidence_refs"]).issubset(evidence_ids))
+                    self.assertTrue(set(claim["contradicting_evidence_refs"]).issubset(evidence_ids))
+                    self.assertIn(claim["confidence"], {"high", "medium", "low", "unknown"})
+                    self.assertIsInstance(claim["missing_data"], list)
+                elif claim["claim_type"] == "unknown":
+                    self.assertTrue(claim["missing_data"])
+                else:
+                    self.fail(f"unexpected claim_type: {claim['claim_type']}")
+
+            breach_claim = next(
+                claim
+                for claim in evidence_summary["claims"]
+                if "error_rate_pct=66.667" in claim["statement"]
+            )
+            self.assertEqual("confirmed_fact", breach_claim["claim_type"])
+            breach_source_types = {
+                evidence["source_type"]
+                for evidence in evidence_summary["evidence"]
+                if evidence["evidence_id"] in breach_claim["evidence_refs"]
+            }
+            self.assertEqual({"incident", "log"}, breach_source_types)
+
+            serialized = json.dumps(evidence_summary, ensure_ascii=False)
+            self.assertNotIn("market data request synthetic timeout", serialized)
+            self.assertNotIn(str(FIXTURE_BUNDLE), serialized)
+
+    def test_evidence_summary_does_not_leak_seeded_secret_messages(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            output_path = Path(temp_dir) / "out"
+            bundle_path.mkdir()
+            write_valid_incident(bundle_path)
+            write_seeded_secret_logs(bundle_path)
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(output_path))
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            serialized = (output_path / "evidence-summary.json").read_text(encoding="utf-8")
+            for secret in SEEDED_SECRET_VALUES:
+                self.assertNotIn(secret, serialized)
+            self.assertNotIn("Authorization: Bearer", serialized)
+            self.assertNotIn("api_key=", serialized)
 
 
 if __name__ == "__main__":

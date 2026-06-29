@@ -1608,7 +1608,6 @@
 - 수정: `src/tests/test_run_openbell_cli.py`
 - 수정: `src/skills/openbell-guard/SKILL.md`
 - 수정: `Decisionlog.md`
-- 수정: `Troubleshootinglog.md`
 - 수정: `Worklog.md`
 
 **검증**
@@ -2035,3 +2034,69 @@
 - 다음 단계는 P4-13 evidence·claim 구성입니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-050 요약을 추가하고 D-029 하위 페이지를 생성했으며, fetch로 두 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이고 D-029 URL은 `https://app.notion.com/p/38e05ea68bfc810cbe7fe28b16d60355`입니다.
 - Git 동기화 완료: P4-12 산출물과 W-050/D-029 기록을 커밋 `cfa8117dffa11bf26289aace5a9193394cbdf1a8`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영합니다.
+
+### W-051 · Phase 4 P4-13 evidence·claim 구성
+
+**요청**
+
+- 다음 단계 구현을 진행합니다. 현재 순서상 P4-13 evidence·claim 구성을 구현합니다.
+
+**수행 작업**
+
+- `run_openbell.py`의 단계명을 P4-13으로 올렸습니다.
+- 최종 `analysis.json`을 바로 만들지 않고, 중간 산출물 `evidence-summary.json`을 먼저 생성하도록 했습니다.
+- `metric-summary.json`, `state-summary.json`, `incident.json` 임계치, `service-map.json` 정보를 사용해 근거 항목 `E-###`을 생성했습니다.
+- 로그·메트릭 원문 값 대신 파일명, 행 범위, 집계값, 임계치와 bucket 시각만 evidence에 남기도록 했습니다.
+- 주장 항목 `C-###`을 `confirmed_fact`, `hypothesis`, `unknown`으로 구분했습니다.
+- 임계치 초과 bucket, 정상 bucket, CPU·메모리 맥락 지표는 `confirmed_fact`로 연결했습니다.
+- 장애 영향 가능성은 `hypothesis`로 기록하고, 지지 근거, 반대 근거, 부족한 데이터와 `medium` 신뢰도를 함께 남겼습니다.
+- 근본 원인 확정은 `unknown`으로 기록해 합성 데이터만으로 실제 원인을 단정하지 않도록 했습니다.
+- CLI 성공 요약에 `evidence_summary_file`, evidence 수, claim 수, claim 종류별 수량, `raw_excerpts_emitted=false`를 추가했습니다.
+- `src/tests/test_run_openbell_cli.py`에 evidence 참조 무결성, claim marker, source type, 절대경로·원문 로그·비밀정보 비노출 테스트를 추가했습니다.
+- `src/skills/openbell-guard/SKILL.md`를 P4-13 현재 구현 범위와 한계에 맞게 갱신했습니다.
+- D-030을 기록했습니다.
+- 이번 단계에서는 최종 `analysis.json`, Markdown 보고서, M-016~M-017 benchmark를 구현하지 않았습니다.
+
+**변경 파일**
+
+- 수정: `src/skills/openbell-guard/scripts/run_openbell.py`
+- 수정: `src/tests/test_run_openbell_cli.py`
+- 수정: `src/skills/openbell-guard/SKILL.md`
+- 수정: `Decisionlog.md`
+- 수정: `Troubleshootinglog.md`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `python -m py_compile .\src\skills\openbell-guard\scripts\run_openbell.py .\src\tests\test_run_openbell_cli.py`가 통과했습니다.
+- `python -m unittest .\src\tests\test_run_openbell_cli.py -v`를 실행해 CLI·입력 검사·마스킹·행 단위 파서·버킷·M-001~M-015·상태 판정·evidence·claim 테스트 32개가 모두 통과했습니다.
+- `python -m unittest discover -s src\tests -v`를 실행해 전체 테스트 44개가 모두 통과했습니다.
+- `python .\tools\preflight_check.py --quiet` 결과 `SUMMARY ok=5 warn=0 error=0`을 확인했습니다.
+- `python $env:USERPROFILE\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src`가 `Plugin validation passed`로 통과했습니다.
+- `python -X utf8 $env:USERPROFILE\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard`가 `Skill is valid!`로 통과했습니다.
+- `python .\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\src\tests\fixtures\domestic-market-open-min\bundle --output .\out\p4-13-final-smoke`를 실행해 exit 0, `stage=P4-13`, `run_status=evidence_claim_ready`, `evidence_summary_created=true`, `evidence_count=5`, `claim_count=5`, `claim_counts={"confirmed_fact":3,"hypothesis":1,"unknown":1}`, `analysis_json_created=false`를 확인했습니다.
+- `out/p4-13-final-smoke` 주요 산출물에서 원문 로그 문구 `market data request synthetic timeout`, `Authorization: Bearer `, `api_key=`, `sk-`, `eyJ` 패턴이 발견되지 않음을 확인했습니다.
+- `logs/` 파일은 수동 편집하지 않았습니다.
+
+**트러블슈팅**
+
+- 새 T-ID는 만들지 않았습니다.
+- Notion 동기화 중 D-030 기존 페이지를 `<page url="...">` 태그로 참조하려 하면서 기존 T-012 유형의 validation error가 재발했습니다.
+- 일반 Markdown 링크 방식으로 즉시 재시도해 W-051 삽입에 성공했고, `Troubleshootinglog.md`의 T-012 후속 메모에 기록했습니다.
+
+**판단 근거**
+
+- 최종 `analysis.json`에 곧바로 claim을 섞으면 근거 참조 오류를 늦게 발견할 수 있으므로, P4-13에서 `evidence-summary.json`을 중간 산출물로 분리했습니다.
+- `confirmed_fact`, `hypothesis`, `unknown`을 분리하면 확인된 사실과 원인 가설, 판단 불가 영역을 사용자와 심사자가 쉽게 구분할 수 있습니다.
+- 실제 카카오페이증권 내부 원인을 단정하지 않기 위해, 합성 데이터의 bucket 악화는 영향 가능성 가설로만 표현하고 근본 원인은 판단 불가로 남겼습니다.
+- 원문 로그 메시지를 출력하지 않고 행 범위와 집계값만 남겨 로그 무결성, 비밀정보 보호와 경량성을 유지했습니다.
+
+**결과**
+
+- P4-13이 완료됐습니다. 이제 OpenBell Guard는 `evidence-summary.json`에 근거 `E-###`과 주장 `C-###`을 구성하고, 각 주장을 확인된 사실·가설·판단 불가로 나누어 추적할 수 있습니다.
+- 관련 결정: D-030 `근거와 주장을 evidence-summary.json 중간 산출물로 먼저 분리`
+- 현재 단계는 Phase 4의 P4-13/19이며, P4-12 맥락 지표 다음의 evidence·claim 구성 단계입니다.
+- 남은 태스크는 P4-14~P4-19 약 6단계이며, 예상 작업량은 높음입니다.
+- 다음 단계는 P4-14 최종 `analysis.json` 생성입니다.
+- Notion 동기화 대기: Phase 4 페이지에 W-051 요약을 추가하고 D-030 하위 페이지를 생성한 뒤 검증해야 합니다.
+- Git 동기화 대기: P4-13 산출물과 W-051/D-030 기록을 커밋하고 원격 `origin/main`에 push해야 합니다.

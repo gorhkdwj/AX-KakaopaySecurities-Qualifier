@@ -1,9 +1,9 @@
 """OpenBell Guard command-line entry point.
 
-P4-12 implements the shared CLI, bundle preflight gate, sanitizer,
+P4-13 implements the shared CLI, bundle preflight gate, sanitizer,
 line-oriented telemetry parser, 60-second bucket preparation, basic bucket
 metrics, observability lag metrics, baseline-vs-incident comparisons, and
-threshold-based state judgment with context metrics:
+threshold-based state judgment with context metrics and evidence-backed claims:
 
 - parse ``--bundle`` and ``--output``;
 - verify that the bundle is an existing, non-symlink directory;
@@ -26,6 +26,7 @@ threshold-based state judgment with context metrics:
   request_count and report MET001_COUNT_INCONSISTENT.
 - judge bucket state, service-path state, outage start, recovery time, and
   successful run status into ``state-summary.json``.
+- create evidence and claim summaries without raw excerpts.
 
 It still does not create the final ``analysis.json``. That behavior belongs to
 later Phase 4 steps and must keep using this entry point.
@@ -41,7 +42,7 @@ import math
 import re
 import sys
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -55,7 +56,7 @@ EXIT_CODES = {
     "output_validation_error": 5,
 }
 
-CLI_STAGE = "P4-12"
+CLI_STAGE = "P4-13"
 SUMMARY_FILENAME = "openbell-cli-summary.json"
 SANITIZED_BUNDLE_DIR = "sanitized-bundle"
 SANITIZATION_REPORT = "sanitization-report.md"
@@ -63,6 +64,7 @@ RECORD_SUMMARY_FILENAME = "record-summary.json"
 BUCKET_SUMMARY_FILENAME = "bucket-summary.json"
 METRIC_SUMMARY_FILENAME = "metric-summary.json"
 STATE_SUMMARY_FILENAME = "state-summary.json"
+EVIDENCE_SUMMARY_FILENAME = "evidence-summary.json"
 SCHEMA_VERSION = "1.0"
 CONTRACT_VERSION = "1.0.0"
 BASIC_METRIC_IDS = ("M-001", "M-002", "M-003", "M-004", "M-005", "M-006", "M-007")
@@ -223,10 +225,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="run_openbell.py",
         description=(
-            "Prepare an OpenBell Guard run directory. P4-12 validates the CLI, "
+            "Prepare an OpenBell Guard run directory. P4-13 validates the CLI, "
             "paths, bundle file contract, byte limits, incident metadata, and "
             "creates a masked working copy, telemetry record summary, bucket summary, "
-            "metric summary, and threshold-based state summary."
+            "metric summary, threshold-based state summary, and evidence summary."
         ),
     )
     parser.add_argument(
@@ -1513,6 +1515,404 @@ def build_state_summary(
     }
 
 
+def next_evidence_id(evidence: list[dict[str, Any]]) -> str:
+    return f"E-{len(evidence) + 1:03}"
+
+
+def next_claim_id(claims: list[dict[str, Any]]) -> str:
+    return f"C-{len(claims) + 1:03}"
+
+
+def claim_with_marker(claim: dict[str, Any]) -> dict[str, Any]:
+    claim["report_claim_marker"] = f"[{claim['claim_id']}]"
+    return claim
+
+
+def compact_source_locations(locations: list[str]) -> str:
+    if not locations:
+        return "unknown"
+    parsed: list[tuple[str, str, int]] = []
+    for location in sorted(locations):
+        match = re.match(r"^(?P<file>[^:]+):(?P<prefix>[LR])(?P<number>\d+)$", location)
+        if match is None:
+            return ",".join(sorted(locations))
+        parsed.append((match.group("file"), match.group("prefix"), int(match.group("number"))))
+
+    files = {item[0] for item in parsed}
+    prefixes = {item[1] for item in parsed}
+    numbers = sorted(item[2] for item in parsed)
+    if len(files) == 1 and len(prefixes) == 1:
+        file_name = parsed[0][0]
+        prefix = parsed[0][1]
+        if len(numbers) == 1:
+            return f"{file_name}:{prefix}{numbers[0]}"
+        if numbers == list(range(numbers[0], numbers[-1] + 1)):
+            return f"{file_name}:{prefix}{numbers[0]}-{prefix}{numbers[-1]}"
+    return ",".join(sorted(locations))
+
+
+def source_file_from_locations(locations: list[str]) -> str:
+    if not locations:
+        return "unknown"
+    first = sorted(locations)[0]
+    return first.split(":", 1)[0]
+
+
+def source_type_from_file(source_file: str) -> str:
+    if source_file == "logs.jsonl":
+        return "log"
+    if source_file == "metrics.csv":
+        return "metric"
+    if source_file == "service-map.json":
+        return "service_map"
+    return "incident"
+
+
+def local_bucket_window(bucket_start_local: str) -> str:
+    parsed_start = parse_row_datetime(bucket_start_local)
+    if parsed_start is None:
+        return f"[{bucket_start_local}, unknown)"
+    parsed_end = parsed_start + timedelta(seconds=60)
+    return f"[{parsed_start.isoformat()}, {parsed_end.isoformat()})"
+
+
+def display_bucket_time(bucket_start_local: str) -> str:
+    parsed = parse_row_datetime(bucket_start_local)
+    if parsed is None:
+        return bucket_start_local
+    suffix = "KST" if parsed.utcoffset() == timedelta(hours=9) else parsed.tzname() or "local time"
+    return f"{parsed.strftime('%H:%M')} {suffix}"
+
+
+def metric_output_value(metric: dict[str, Any]) -> str:
+    value = metric.get("value")
+    if value is None:
+        return "null"
+    return str(value)
+
+
+def threshold_output_value(value: int | float) -> str:
+    return str(float(value))
+
+
+def add_evidence(
+    evidence: list[dict[str, Any]],
+    *,
+    source_type: str,
+    source_file: str,
+    source_location: str,
+    masked_excerpt: str,
+    time_window: str | None = None,
+) -> str:
+    evidence_id = next_evidence_id(evidence)
+    item: dict[str, Any] = {
+        "evidence_id": evidence_id,
+        "source_type": source_type,
+        "source_file": source_file,
+        "source_location": source_location,
+    }
+    if time_window is not None:
+        item["time_window"] = time_window
+    if masked_excerpt:
+        item["masked_excerpt"] = masked_excerpt[:300]
+    evidence.append(item)
+    return evidence_id
+
+
+def build_threshold_evidence(
+    *, evidence: list[dict[str, Any]], state_summary: dict[str, Any]
+) -> dict[str, str]:
+    refs: dict[str, str] = {}
+    thresholds = state_summary.get("thresholds", {})
+    if not isinstance(thresholds, dict):
+        return refs
+    for service_path in sorted(thresholds):
+        service_thresholds = thresholds.get(service_path, {})
+        if not isinstance(service_thresholds, dict):
+            continue
+        threshold_parts = [
+            f"{key}={threshold_output_value(float(value))}"
+            for key, value in sorted(service_thresholds.items())
+        ]
+        refs[str(service_path)] = add_evidence(
+            evidence,
+            source_type="incident",
+            source_file="incident.json",
+            source_location=f"incident.json:thresholds.{service_path}",
+            masked_excerpt=f"{service_path} " + ", ".join(threshold_parts),
+        )
+    return refs
+
+
+def build_bucket_evidence(
+    *, evidence: list[dict[str, Any]], metric_summary: dict[str, Any]
+) -> dict[tuple[str, str], str]:
+    refs: dict[tuple[str, str], str] = {}
+    for bucket in metric_summary.get("bucket_metrics", []):
+        if bucket.get("window_type") != "incident":
+            continue
+        locations = list(bucket.get("source_locations", []))
+        source_file = source_file_from_locations(locations)
+        source_type = source_type_from_file(source_file)
+        metrics = bucket.get("metrics", {})
+        request_count = metric_output_value(metrics.get("request_count", {}))
+        error_count = metric_output_value(metrics.get("error_count", {}))
+        status_word = "status" if error_count == "1" else "statuses"
+        excerpt = (
+            f"{request_count} {bucket['service_path']} requests, "
+            f"{error_count} error-or-timeout {status_word}"
+        )
+        refs[(str(bucket["service_path"]), str(bucket["bucket_start_utc"]))] = add_evidence(
+            evidence,
+            source_type=source_type,
+            source_file=source_file,
+            source_location=compact_source_locations(locations),
+            time_window=local_bucket_window(str(bucket["bucket_start_local"])),
+            masked_excerpt=excerpt,
+        )
+    return refs
+
+
+def build_context_evidence(
+    *, evidence: list[dict[str, Any]], metric_summary: dict[str, Any]
+) -> dict[tuple[str, str], str]:
+    refs: dict[tuple[str, str], str] = {}
+    for context in metric_summary.get("context_metrics", []):
+        if context.get("window_type") != "incident":
+            continue
+        locations = list(context.get("source_locations", []))
+        metrics = context.get("metrics", {})
+        cpu = metric_output_value(metrics.get("cpu_utilization_median_pct", {}))
+        memory = metric_output_value(metrics.get("memory_utilization_median_pct", {}))
+        refs[(str(context["service_path"]), str(context["bucket_start_utc"]))] = add_evidence(
+            evidence,
+            source_type="metric",
+            source_file=source_file_from_locations(locations),
+            source_location=compact_source_locations(locations),
+            time_window=local_bucket_window(str(context["bucket_start_local"])),
+            masked_excerpt=(
+                f"M-015 context for {context['service_path']}: "
+                f"cpu_utilization_median_pct={cpu}, memory_utilization_median_pct={memory}"
+            ),
+        )
+    return refs
+
+
+def build_service_map_evidence(
+    *, evidence: list[dict[str, Any]], preflight_summary: dict[str, Any]
+) -> dict[str, str]:
+    refs: dict[str, str] = {}
+    service_map = preflight_summary.get("service_map", {})
+    if not isinstance(service_map, dict) or not service_map.get("provided"):
+        return refs
+    service_path_by_name = service_map.get("service_path_by_name", {})
+    dependency_type_by_name = service_map.get("dependency_type_by_name", {})
+    if not isinstance(service_path_by_name, dict) or not isinstance(dependency_type_by_name, dict):
+        return refs
+    for index, service_name in enumerate(sorted(service_path_by_name)):
+        service_path = str(service_path_by_name[service_name])
+        dependency_type = str(dependency_type_by_name.get(service_name, "unknown"))
+        refs[service_path] = add_evidence(
+            evidence,
+            source_type="service_map",
+            source_file="service-map.json",
+            source_location=f"service-map.json:services[{index}]",
+            masked_excerpt=f"{service_name} maps to {service_path} with {dependency_type} dependency_type",
+        )
+    return refs
+
+
+def confidence_from_evidence(
+    *,
+    supporting_evidence_refs: list[str],
+    contradicting_evidence_refs: list[str],
+    missing_data: list[str],
+    evidence_by_id: dict[str, dict[str, Any]],
+) -> str:
+    if not supporting_evidence_refs:
+        return "unknown"
+    source_types = {
+        str(evidence_by_id[evidence_ref]["source_type"])
+        for evidence_ref in supporting_evidence_refs
+        if evidence_ref in evidence_by_id
+    }
+    has_direct = bool(source_types & {"log", "metric"})
+    if {"log", "metric"}.issubset(source_types) and not contradicting_evidence_refs and not missing_data:
+        return "high"
+    if has_direct and not contradicting_evidence_refs:
+        return "medium"
+    return "low"
+
+
+def build_evidence_claim_summary(
+    *,
+    preflight_summary: dict[str, Any],
+    metric_summary: dict[str, Any],
+    state_summary: dict[str, Any],
+) -> dict[str, Any]:
+    evidence: list[dict[str, Any]] = []
+    claims: list[dict[str, Any]] = []
+    threshold_refs = build_threshold_evidence(evidence=evidence, state_summary=state_summary)
+    bucket_refs = build_bucket_evidence(evidence=evidence, metric_summary=metric_summary)
+    context_refs = build_context_evidence(evidence=evidence, metric_summary=metric_summary)
+    service_map_refs = build_service_map_evidence(evidence=evidence, preflight_summary=preflight_summary)
+
+    state_by_key = {
+        (str(state["service_path"]), str(state["bucket_start_utc"])): state
+        for state in state_summary.get("bucket_states", [])
+    }
+    metric_by_key = {
+        (str(bucket["service_path"]), str(bucket["bucket_start_utc"])): bucket
+        for bucket in metric_summary.get("bucket_metrics", [])
+    }
+
+    for key in sorted(bucket_refs):
+        state = state_by_key.get(key)
+        bucket = metric_by_key.get(key)
+        if not state or not bucket:
+            continue
+        service_path, bucket_start_utc = key
+        threshold_ref = threshold_refs.get(service_path)
+        bucket_ref = bucket_refs[key]
+        metrics = bucket.get("metrics", {})
+        request_count = metric_output_value(metrics.get("request_count", {}))
+        error_count = metric_output_value(metrics.get("error_count", {}))
+        error_rate = metric_output_value(metrics.get("error_rate_pct", {}))
+        evidence_refs = [ref for ref in [threshold_ref, bucket_ref] if ref]
+        if state.get("bucket_state") == "breach":
+            threshold_value = None
+            breach_reasons = state.get("breach_reasons", [])
+            if breach_reasons:
+                threshold_value = threshold_output_value(float(breach_reasons[0]["threshold"]))
+            claims.append(
+                claim_with_marker(
+                    {
+                        "claim_id": next_claim_id(claims),
+                        "claim_type": "confirmed_fact",
+                        "statement": (
+                            f"The {display_bucket_time(str(bucket['bucket_start_local']))} {service_path} bucket "
+                            f"has request_count={request_count}, error_count={error_count}, "
+                            f"and error_rate_pct={error_rate}, which exceeds the {threshold_value} threshold."
+                        ),
+                        "evidence_refs": evidence_refs,
+                    }
+                )
+            )
+        elif state.get("window_type") == "incident" and state.get("bucket_state") == "healthy":
+            claims.append(
+                claim_with_marker(
+                    {
+                        "claim_id": next_claim_id(claims),
+                        "claim_type": "confirmed_fact",
+                        "statement": (
+                            f"The {display_bucket_time(str(bucket['bucket_start_local']))} {service_path} bucket "
+                            f"has request_count={request_count}, error_count={error_count}, "
+                            f"and error_rate_pct={error_rate}, so it does not breach the configured threshold."
+                        ),
+                        "evidence_refs": evidence_refs,
+                    }
+                )
+            )
+
+    for context_key in sorted(context_refs):
+        context = next(
+            (
+                item
+                for item in metric_summary.get("context_metrics", [])
+                if (str(item["service_path"]), str(item["bucket_start_utc"])) == context_key
+            ),
+            None,
+        )
+        if not context:
+            continue
+        metrics = context.get("metrics", {})
+        cpu = metric_output_value(metrics.get("cpu_utilization_median_pct", {}))
+        memory = metric_output_value(metrics.get("memory_utilization_median_pct", {}))
+        claims.append(
+            claim_with_marker(
+                {
+                    "claim_id": next_claim_id(claims),
+                    "claim_type": "confirmed_fact",
+                    "statement": (
+                        f"The {display_bucket_time(str(context['bucket_start_local']))} {context['service_path']} "
+                        f"context metrics show cpu_utilization_median_pct={cpu} and "
+                        f"memory_utilization_median_pct={memory}."
+                    ),
+                    "evidence_refs": [context_refs[context_key]],
+                }
+            )
+        )
+
+    evidence_by_id = {item["evidence_id"]: item for item in evidence}
+    for path_state in state_summary.get("service_paths", []):
+        status = str(path_state.get("status"))
+        if status == "healthy":
+            continue
+        service_path = str(path_state["service_path"])
+        supporting_refs = [
+            evidence_ref
+            for key, evidence_ref in bucket_refs.items()
+            if key[0] == service_path
+        ]
+        if service_path in service_map_refs:
+            supporting_refs.append(service_map_refs[service_path])
+        missing_data = [
+            "No downstream dependency error metrics",
+            "No trace-level causal chain",
+            "No independent exchange-side status feed",
+        ]
+        claims.append(
+            claim_with_marker(
+                {
+                    "claim_id": next_claim_id(claims),
+                    "claim_type": "hypothesis",
+                    "statement": (
+                        f"{service_path} degradation is a plausible incident-window impact hypothesis, "
+                        "but the bundle does not prove the underlying root cause."
+                    ),
+                    "supporting_evidence_refs": supporting_refs,
+                    "contradicting_evidence_refs": [],
+                    "missing_data": missing_data,
+                    "confidence": confidence_from_evidence(
+                        supporting_evidence_refs=supporting_refs,
+                        contradicting_evidence_refs=[],
+                        missing_data=missing_data,
+                        evidence_by_id=evidence_by_id,
+                    ),
+                }
+            )
+        )
+
+    claims.append(
+        claim_with_marker(
+            {
+                "claim_id": next_claim_id(claims),
+                "claim_type": "unknown",
+                "statement": "The current bundle does not establish a root cause.",
+                "missing_data": [
+                    "No downstream dependency error metrics",
+                    "No trace-level causal chain",
+                    "No independent exchange-side status feed",
+                ],
+            }
+        )
+    )
+
+    claim_counts = summarize_issues([{"issue_code": claim["claim_type"]} for claim in claims])
+    return {
+        "schema_version": "0.1",
+        "stage": CLI_STAGE,
+        "status": state_summary["run"]["status"],
+        "contract_version": CONTRACT_VERSION,
+        "evidence_count": len(evidence),
+        "claim_count": len(claims),
+        "claim_counts": claim_counts,
+        "evidence": evidence,
+        "claims": claims,
+        "raw_excerpts_emitted": False,
+    }
+
+
 def parse_logs_jsonl(text: str, incident_summary: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     counts = empty_record_counts()
     issues: list[dict[str, Any]] = []
@@ -2605,6 +3005,22 @@ def write_state_summary(*, output_path: Path, payload: dict[str, Any]) -> dict[s
     return None
 
 
+def write_evidence_summary(*, output_path: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        (output_path / EVIDENCE_SUMMARY_FILENAME).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        return issue_payload(
+            exit_code=EXIT_CODES["output_validation_error"],
+            issue_code="CLI018_EVIDENCE_SUMMARY_WRITE_FAILED",
+            message="The evidence summary file could not be written.",
+            argument="output",
+        )
+    return None
+
+
 def write_metric_summary(*, output_path: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
     try:
         (output_path / METRIC_SUMMARY_FILENAME).write_text(
@@ -2701,11 +3117,12 @@ def success_payload(
     bucket_summary: dict[str, Any],
     metric_summary: dict[str, Any],
     state_summary: dict[str, Any],
+    evidence_summary: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "schema_version": "0.1",
         "stage": CLI_STAGE,
-        "run_status": "context_metrics_ready",
+        "run_status": "evidence_claim_ready",
         "exit_code": EXIT_CODES["ok"],
         "bundle": {
             "name": bundle_path.name,
@@ -2726,6 +3143,8 @@ def success_payload(
             "metric_summary_created": True,
             "state_summary_file": STATE_SUMMARY_FILENAME,
             "state_summary_created": True,
+            "evidence_summary_file": EVIDENCE_SUMMARY_FILENAME,
+            "evidence_summary_created": True,
             "analysis_json_created": False,
             "sanitization_report_created": True,
             "sanitization_report_file": SANITIZATION_REPORT,
@@ -2768,6 +3187,14 @@ def success_payload(
             "path_status_counts": state_summary["path_status_counts"],
             "raw_excerpts_emitted": False,
         },
+        "evidence": {
+            "evidence_summary_file": EVIDENCE_SUMMARY_FILENAME,
+            "status": evidence_summary["status"],
+            "evidence_count": evidence_summary["evidence_count"],
+            "claim_count": evidence_summary["claim_count"],
+            "claim_counts": evidence_summary["claim_counts"],
+            "raw_excerpts_emitted": False,
+        },
         "implemented_scope": [
             "parse --bundle and --output",
             "validate bundle directory existence",
@@ -2795,10 +3222,11 @@ def success_payload(
             "judge bucket states from configured thresholds",
             "derive service path outage_start and recovery_time from consecutive buckets",
             "write state-summary.json without raw excerpts",
+            "create evidence and claim summaries without raw excerpts",
+            "write evidence-summary.json without raw excerpts",
         ],
         "deferred_scope": [
             "M-016 through M-017 pipeline benchmark metric calculation",
-            "evidence and claim generation",
             "analysis.json generation",
         ],
         "exit_code_skeleton": EXIT_CODES,
@@ -2860,6 +3288,11 @@ def run(bundle_arg: str, output_arg: str) -> int:
     assert bucket_summary is not None
     assert metric_summary is not None
     assert state_summary is not None
+    evidence_summary = build_evidence_claim_summary(
+        preflight_summary=preflight_summary,
+        metric_summary=metric_summary,
+        state_summary=state_summary,
+    )
 
     issue = write_record_summary(output_path=output_path, payload=record_summary)
     if issue is not None:
@@ -2877,6 +3310,10 @@ def run(bundle_arg: str, output_arg: str) -> int:
     if issue is not None:
         write_stderr_json(issue)
         return int(issue["exit_code"])
+    issue = write_evidence_summary(output_path=output_path, payload=evidence_summary)
+    if issue is not None:
+        write_stderr_json(issue)
+        return int(issue["exit_code"])
 
     payload = success_payload(
         bundle_path=bundle_path,
@@ -2886,6 +3323,7 @@ def run(bundle_arg: str, output_arg: str) -> int:
         bucket_summary=bucket_summary,
         metric_summary=metric_summary,
         state_summary=state_summary,
+        evidence_summary=evidence_summary,
     )
     issue = write_summary(output_path=output_path, payload=payload)
     if issue is not None:
