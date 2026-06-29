@@ -1,0 +1,2 @@
+timestamp,service_name,service_path,dependency_type,metric_name,value,unit
+2026-06-30T09:00:00+09:00,quote-api,market_data,exchange,cpu_utilization_pct,62.5,percent

@@ -1,0 +1,10 @@
+{
+  "services": [
+    {
+      "service_name": "quote-api",
+      "service_path": "market_data",
+      "dependency_type": "exchange",
+      "dependencies": []
+    }
+  ]
+}

@@ -1,0 +1,287 @@
+{
+  "schema_version": "1.0",
+  "contract_version": "1.0.0",
+  "contract_sha256": "64551154261053147424c72d1156ebaaff9d6b2b73ca6531bfa28cf318650f6b",
+  "fixture_id": "domestic-market-open-min",
+  "run": {
+    "status": "complete",
+    "exit_code": 0,
+    "issues": [],
+    "limitations": []
+  },
+  "incident": {
+    "incident_id": "domestic-market-open-min",
+    "timezone": "Asia/Seoul",
+    "baseline_window": {
+      "start": "2026-06-30T08:58:00+09:00",
+      "end": "2026-06-30T08:59:00+09:00"
+    },
+    "incident_window": {
+      "start": "2026-06-30T09:00:00+09:00",
+      "end": "2026-06-30T09:02:00+09:00"
+    }
+  },
+  "source_summary": {
+    "primary_telemetry": "logs.jsonl",
+    "context_files": [
+      "metrics.csv",
+      "service-map.json"
+    ],
+    "metric_contract_reference": "src/skills/openbell-guard/references/metrics-validation-contract.md"
+  },
+  "record_counts": {
+    "m_id": "M-014",
+    "total": {
+      "physical_record_count": 9,
+      "accepted_record_count": 9,
+      "rejected_record_count": 0,
+      "outside_analysis_window_count": 0,
+      "field_dropped_count": 0
+    },
+    "by_source": {
+      "logs.jsonl": {
+        "physical_record_count": 8,
+        "accepted_record_count": 8,
+        "rejected_record_count": 0,
+        "outside_analysis_window_count": 0,
+        "field_dropped_count": 0
+      },
+      "metrics.csv": {
+        "physical_record_count": 1,
+        "accepted_record_count": 1,
+        "rejected_record_count": 0,
+        "outside_analysis_window_count": 0,
+        "field_dropped_count": 0
+      }
+    }
+  },
+  "service_paths": [
+    {
+      "service_path": "market_data",
+      "status": "degradation_observed",
+      "outage_start": null,
+      "recovery_time": null,
+      "ongoing_at_window_end": false
+    }
+  ],
+  "bucket_metrics": [
+    {
+      "service_path": "market_data",
+      "window_type": "baseline",
+      "bucket_start_utc": "2026-06-29T23:58:00+00:00",
+      "bucket_start_local": "2026-06-30T08:58:00+09:00",
+      "bucket_state": "healthy",
+      "metrics": {
+        "request_count": {
+          "m_id": "M-001",
+          "value": 2,
+          "unit": "count"
+        },
+        "error_count": {
+          "m_id": "M-002",
+          "value": 0,
+          "unit": "count"
+        },
+        "throughput_rps": {
+          "m_id": "M-003",
+          "value": 0.033,
+          "unit": "requests/second"
+        },
+        "error_rate_pct": {
+          "m_id": "M-004",
+          "value": 0.0,
+          "unit": "percent"
+        },
+        "latency_p50_ms": {
+          "m_id": "M-005",
+          "value": 80,
+          "unit": "ms",
+          "sample_count": 2
+        },
+        "latency_p95_ms": {
+          "m_id": "M-006",
+          "value": null,
+          "unit": "ms",
+          "sample_count": 2,
+          "reason_code": "insufficient_sample"
+        },
+        "latency_p99_ms": {
+          "m_id": "M-007",
+          "value": null,
+          "unit": "ms",
+          "sample_count": 2,
+          "reason_code": "insufficient_sample"
+        }
+      }
+    },
+    {
+      "service_path": "market_data",
+      "window_type": "incident",
+      "bucket_start_utc": "2026-06-30T00:00:00+00:00",
+      "bucket_start_local": "2026-06-30T09:00:00+09:00",
+      "bucket_state": "breach",
+      "breach_reasons": [
+        {
+          "metric": "error_rate_pct",
+          "value": 66.667,
+          "threshold": 50.0,
+          "operator": ">"
+        }
+      ],
+      "metrics": {
+        "request_count": {
+          "m_id": "M-001",
+          "value": 3,
+          "unit": "count"
+        },
+        "error_count": {
+          "m_id": "M-002",
+          "value": 2,
+          "unit": "count"
+        },
+        "throughput_rps": {
+          "m_id": "M-003",
+          "value": 0.05,
+          "unit": "requests/second"
+        },
+        "error_rate_pct": {
+          "m_id": "M-004",
+          "value": 66.667,
+          "unit": "percent"
+        },
+        "latency_p50_ms": {
+          "m_id": "M-005",
+          "value": 160,
+          "unit": "ms",
+          "sample_count": 3
+        },
+        "latency_p95_ms": {
+          "m_id": "M-006",
+          "value": null,
+          "unit": "ms",
+          "sample_count": 3,
+          "reason_code": "insufficient_sample"
+        },
+        "latency_p99_ms": {
+          "m_id": "M-007",
+          "value": null,
+          "unit": "ms",
+          "sample_count": 3,
+          "reason_code": "insufficient_sample"
+        }
+      }
+    },
+    {
+      "service_path": "market_data",
+      "window_type": "incident",
+      "bucket_start_utc": "2026-06-30T00:01:00+00:00",
+      "bucket_start_local": "2026-06-30T09:01:00+09:00",
+      "bucket_state": "healthy",
+      "metrics": {
+        "request_count": {
+          "m_id": "M-001",
+          "value": 3,
+          "unit": "count"
+        },
+        "error_count": {
+          "m_id": "M-002",
+          "value": 1,
+          "unit": "count"
+        },
+        "throughput_rps": {
+          "m_id": "M-003",
+          "value": 0.05,
+          "unit": "requests/second"
+        },
+        "error_rate_pct": {
+          "m_id": "M-004",
+          "value": 33.333,
+          "unit": "percent"
+        },
+        "latency_p50_ms": {
+          "m_id": "M-005",
+          "value": 140,
+          "unit": "ms",
+          "sample_count": 3
+        },
+        "latency_p95_ms": {
+          "m_id": "M-006",
+          "value": null,
+          "unit": "ms",
+          "sample_count": 3,
+          "reason_code": "insufficient_sample"
+        },
+        "latency_p99_ms": {
+          "m_id": "M-007",
+          "value": null,
+          "unit": "ms",
+          "sample_count": 3,
+          "reason_code": "insufficient_sample"
+        }
+      }
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "E-001",
+      "source_type": "incident",
+      "source_file": "incident.json",
+      "source_location": "incident.json:thresholds.market_data",
+      "time_window": "[2026-06-30T09:00:00+09:00, 2026-06-30T09:02:00+09:00)",
+      "masked_excerpt": "market_data error_rate_pct_max=50.0"
+    },
+    {
+      "evidence_id": "E-002",
+      "source_type": "log",
+      "source_file": "logs.jsonl",
+      "source_location": "logs.jsonl:L3-L5",
+      "time_window": "[2026-06-30T09:00:00+09:00, 2026-06-30T09:01:00+09:00)",
+      "masked_excerpt": "3 market_data requests, 2 error-or-timeout statuses"
+    },
+    {
+      "evidence_id": "E-003",
+      "source_type": "log",
+      "source_file": "logs.jsonl",
+      "source_location": "logs.jsonl:L6-L8",
+      "time_window": "[2026-06-30T09:01:00+09:00, 2026-06-30T09:02:00+09:00)",
+      "masked_excerpt": "3 market_data requests, 1 error status"
+    },
+    {
+      "evidence_id": "E-004",
+      "source_type": "service_map",
+      "source_file": "service-map.json",
+      "source_location": "service-map.json:services[0]",
+      "masked_excerpt": "quote-api maps to market_data with exchange dependency_type"
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "C-001",
+      "claim_type": "confirmed_fact",
+      "statement": "The 09:00 KST market_data bucket has request_count=3, error_count=2, and error_rate_pct=66.667, which exceeds the 50.0 threshold.",
+      "evidence_refs": [
+        "E-001",
+        "E-002"
+      ]
+    },
+    {
+      "claim_id": "C-002",
+      "claim_type": "confirmed_fact",
+      "statement": "The 09:01 KST market_data bucket has request_count=3, error_count=1, and error_rate_pct=33.333, so there are not two consecutive breach buckets.",
+      "evidence_refs": [
+        "E-001",
+        "E-003"
+      ]
+    },
+    {
+      "claim_id": "C-003",
+      "claim_type": "unknown",
+      "statement": "The minimal fixture does not establish a root cause.",
+      "missing_data": [
+        "No downstream dependency error metrics",
+        "No trace-level causal chain",
+        "No independent exchange-side status feed"
+      ]
+    }
+  ]
+}

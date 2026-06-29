@@ -1411,3 +1411,57 @@
 - 다음 단계는 P4-03 최소 입력·출력 구조와 Golden 씨앗 작성입니다.
 - Notion 동기화 완료: Phase 4에 W-039 요약 추가 요청이 성공했고, D-025 하위 결정 페이지를 생성했습니다. Notion 검색으로 D-025 페이지와 Phase 4의 D-025 링크 노출을 확인했습니다.
 - Git 동기화 완료: W-039 산출물과 기록을 원격 `origin/main`에 push했습니다.
+
+### W-040 · Phase 4 P4-03 최소 입력·출력 구조와 Golden 씨앗
+
+**요청**
+
+- 다음 구현 작업을 이어서 진행합니다. 현재 순서상 P4-03 최소 입력·출력 구조와 Golden 씨앗을 만들되, 이후 단계와 충돌하지 않도록 작게 검증하며 진행합니다.
+
+**수행 작업**
+
+- `engineering:testing-strategy` Skill을 참고해 이번 단계를 실제 분석기 구현 전 Golden 기준을 고정하는 테스트 단계로 한정했습니다.
+- `docs/phase4-implementation-sequence.md`와 `docs/openbell-guard-metrics-validation-contract.md` 기준을 확인해 P4-03의 범위를 fixture와 기대 출력 씨앗으로 제한했습니다.
+- 국내장 개장 직후 시세 경로 지연·오류를 나타내는 최소 합성 bundle을 추가했습니다.
+- `incident.json`, `logs.jsonl`, `metrics.csv`, `service-map.json`로 입력 파일 역할을 분리했습니다.
+- `expected/analysis.json`에 분석기가 나중에 맞춰야 할 Golden 출력 기준을 작성했습니다.
+- `src/tests/test_domestic_market_open_min_fixture.py`를 추가해 입력 bundle 구조, 시간 창, 표준 경로·의존성 코드, 핵심 지표 계산, 근거 연결, 근본 원인 단정 금지를 검증했습니다.
+- 이번 단계에서는 CLI, 파서, 마스킹, 분석 엔진, 보고서 생성 코드는 구현하지 않았습니다.
+
+**변경 파일**
+
+- 신규: `src/tests/fixtures/domestic-market-open-min/bundle/incident.json`
+- 신규: `src/tests/fixtures/domestic-market-open-min/bundle/logs.jsonl`
+- 신규: `src/tests/fixtures/domestic-market-open-min/bundle/metrics.csv`
+- 신규: `src/tests/fixtures/domestic-market-open-min/bundle/service-map.json`
+- 신규: `src/tests/fixtures/domestic-market-open-min/expected/analysis.json`
+- 신규: `src/tests/test_domestic_market_open_min_fixture.py`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `python -m unittest .\src\tests\test_domestic_market_open_min_fixture.py -v`를 실행해 9개 테스트가 모두 통과했습니다.
+- `python -m unittest .\src\tests\test_contract_reference.py -v`를 실행해 P4-02 계약 SHA 테스트 3개가 모두 통과했습니다.
+- `python .\tools\preflight_check.py --quiet` 결과 `ok=5`, `warn=0`, `error=0`을 확인했습니다.
+- `python C:\Users\gorhk\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src`가 통과했습니다.
+- `python -X utf8 C:\Users\gorhk\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard`가 `Skill is valid!`로 통과했습니다.
+- `python -m unittest discover -s .\src\tests -v`를 실행해 전체 테스트 12개가 모두 통과했습니다.
+- `python -m py_compile .\src\tests\test_contract_reference.py .\src\tests\test_domestic_market_open_min_fixture.py .\tools\preflight_check.py`가 통과했습니다.
+- `rg -n -i "sk-[A-Za-z0-9]|password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|secret[_-]?key|계좌|account_number" .\src\tests\fixtures\domestic-market-open-min` 결과 의심 항목이 없었습니다.
+- `git status --short --ignored`로 새 fixture와 테스트만 추적 대상이며 `logs/`, 로컬 AI·IDE 상태와 Python 캐시는 제외됨을 확인했습니다.
+- `logs/` 파일은 수동 편집하지 않았습니다.
+
+**트러블슈팅**
+
+- 새 T-ID 없음.
+- 이번 단계에서 오류는 발생하지 않았습니다.
+
+**결과**
+
+- P4-03이 완료됐습니다. 이후 파서·분석기·CLI 구현이 따라야 할 최소 입력 구조와 기대 출력 기준이 고정됐습니다.
+- 새로운 중요한 범위·아키텍처 결정은 없어 Decisionlog 새 항목은 만들지 않았습니다.
+- 현재 단계는 Phase 4의 P4-03/19이며, P4-01 스캐폴드와 P4-02 계약 동기화 다음의 Golden 기준선 단계입니다.
+- 남은 태스크는 P4-04~P4-19 약 16단계이며, 예상 작업량은 높음입니다.
+- 다음 단계는 P4-04 최소 CLI 골격과 입출력 경로 검증입니다.
+- Notion 동기화 완료: Phase 4에 W-040 요약 추가 요청이 성공했고, fetch로 Phase 4 본문에 W-040 항목이 포함된 것을 확인했습니다. 단, Notion enhanced markdown spec URL 조회는 현재 도구에서 유효 URL로 처리되지 않아 실패했으며, 이번 업데이트는 단순 heading/list만 사용했습니다.
+- Git 동기화 대기: W-040 산출물과 기록을 커밋·push해야 합니다.
