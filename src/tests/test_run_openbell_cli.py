@@ -1,8 +1,8 @@
-"""CLI, bundle-preflight, sanitizer, row-parser, and bucket tests for OpenBell Guard.
+"""CLI, bundle-preflight, sanitizer, row-parser, bucket, and metric tests for OpenBell Guard.
 
-P4-08 keeps the shared command-line entry point and adds 60-second UTC bucket
-preparation for sanitized logs and metrics. The script still must not calculate
-metrics or create the final analysis outputs.
+P4-09 keeps the shared command-line entry point and adds basic M-001 through
+M-007 bucket metric calculation for sanitized logs and metrics. The script still
+must not create the final analysis outputs.
 """
 
 from __future__ import annotations
@@ -32,6 +32,15 @@ FIXTURE_BUNDLE = (
     / "fixtures"
     / "domestic-market-open-min"
     / "bundle"
+)
+EXPECTED_ANALYSIS = (
+    PROJECT_ROOT
+    / "src"
+    / "tests"
+    / "fixtures"
+    / "domestic-market-open-min"
+    / "expected"
+    / "analysis.json"
 )
 
 VALID_INCIDENT = {
@@ -187,8 +196,8 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertTrue(summary_path.exists())
 
             payload = json.loads(summary_path.read_text(encoding="utf-8"))
-            self.assertEqual("P4-08", payload["stage"])
-            self.assertEqual("buckets_prepared_ready", payload["run_status"])
+            self.assertEqual("P4-09", payload["stage"])
+            self.assertEqual("basic_metrics_calculated_ready", payload["run_status"])
             self.assertFalse(payload["bundle"]["raw_telemetry_records_parsed"])
             self.assertTrue(payload["bundle"]["sanitized_telemetry_records_parsed"])
             self.assertFalse(payload["bundle"]["raw_excerpts_emitted"])
@@ -196,18 +205,25 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertTrue(payload["outputs"]["sanitization_report_created"])
             self.assertTrue(payload["outputs"]["record_summary_created"])
             self.assertTrue(payload["outputs"]["bucket_summary_created"])
+            self.assertTrue(payload["outputs"]["metric_summary_created"])
             self.assertEqual("domestic-market-open-min", payload["bundle"]["preflight"]["incident"]["incident_id"])
             self.assertEqual(4, len(payload["bundle"]["preflight"]["files"]))
             self.assertTrue((output_path / "sanitized-bundle" / "logs.jsonl").exists())
             self.assertTrue((output_path / "sanitization-report.md").exists())
             self.assertTrue((output_path / "record-summary.json").exists())
             self.assertTrue((output_path / "bucket-summary.json").exists())
+            self.assertTrue((output_path / "metric-summary.json").exists())
             self.assertEqual("logs.jsonl", payload["telemetry"]["primary_telemetry"])
             self.assertEqual(9, payload["telemetry"]["record_counts"]["total"]["physical_record_count"])
             self.assertEqual(9, payload["telemetry"]["record_counts"]["total"]["accepted_record_count"])
             self.assertEqual(0, payload["telemetry"]["record_counts"]["total"]["rejected_record_count"])
             self.assertEqual(3, payload["buckets"]["bucket_count"])
             self.assertEqual(["service_path", "bucket_start_utc"], payload["buckets"]["sort_order"])
+            self.assertEqual(
+                ["M-001", "M-002", "M-003", "M-004", "M-005", "M-006", "M-007"],
+                payload["metrics"]["calculated_m_ids"],
+            )
+            self.assertEqual(3, payload["metrics"]["bucket_count"])
 
             serialized = json.dumps(payload, ensure_ascii=False)
             self.assertNotIn(str(FIXTURE_BUNDLE), serialized)
@@ -382,7 +398,7 @@ class SanitizationTest(unittest.TestCase):
             self.assertEqual(original_logs, (bundle_path / "logs.jsonl").read_text(encoding="utf-8"))
 
             summary = json.loads((output_path / "openbell-cli-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-08", summary["stage"])
+            self.assertEqual("P4-09", summary["stage"])
             self.assertTrue(summary["outputs"]["sanitization_report_created"])
             self.assertFalse(summary["outputs"]["analysis_json_created"])
             self.assertEqual(7, summary["sanitization"]["total_redactions"])
@@ -587,7 +603,7 @@ class BucketSummaryTest(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             bucket_summary = json.loads((output_path / "bucket-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-08", bucket_summary["stage"])
+            self.assertEqual("P4-09", bucket_summary["stage"])
             self.assertEqual("UTC", bucket_summary["time_basis"])
             self.assertEqual("Asia/Seoul", bucket_summary["display_timezone"])
             self.assertEqual(["service_path", "bucket_start_utc"], bucket_summary["sort_order"])
@@ -640,6 +656,182 @@ class BucketSummaryTest(unittest.TestCase):
             self.assertEqual("market_data", bucket["service_path"])
             self.assertEqual("2026-06-30T00:00:00+00:00", bucket["bucket_start_utc"])
             self.assertEqual({"logs.jsonl": 0, "metrics.csv": 1}, bucket["source_counts"])
+
+
+class BasicMetricSummaryTest(unittest.TestCase):
+    def test_fixture_metric_summary_matches_m001_to_m007_golden_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "openbell-out"
+
+            completed = run_cli("--bundle", str(FIXTURE_BUNDLE), "--output", str(output_path))
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            metric_summary = json.loads((output_path / "metric-summary.json").read_text(encoding="utf-8"))
+            expected_analysis = json.loads(EXPECTED_ANALYSIS.read_text(encoding="utf-8"))
+
+            self.assertEqual("P4-09", metric_summary["stage"])
+            self.assertEqual("logs.jsonl", metric_summary["primary_telemetry"])
+            self.assertEqual(["service_path", "bucket_start_utc"], metric_summary["sort_order"])
+            self.assertEqual(3, metric_summary["bucket_count"])
+            self.assertFalse(metric_summary["raw_excerpts_emitted"])
+
+            actual_by_key = {
+                (bucket["service_path"], bucket["bucket_start_utc"]): bucket
+                for bucket in metric_summary["bucket_metrics"]
+            }
+            expected_by_key = {
+                (bucket["service_path"], bucket["bucket_start_utc"]): bucket
+                for bucket in expected_analysis["bucket_metrics"]
+            }
+            self.assertEqual(set(expected_by_key), set(actual_by_key))
+
+            for key, expected_bucket in expected_by_key.items():
+                actual_bucket = actual_by_key[key]
+                self.assertEqual(expected_bucket["window_type"], actual_bucket["window_type"])
+                self.assertEqual(expected_bucket["bucket_start_local"], actual_bucket["bucket_start_local"])
+                self.assertEqual("logs.jsonl", actual_bucket["source_for_m001_m007"])
+                for metric_name, expected_metric in expected_bucket["metrics"].items():
+                    self.assertEqual(expected_metric, actual_bucket["metrics"][metric_name])
+
+    def test_metrics_only_source_calculates_counts_error_rate_and_nearest_rank(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            output_path = Path(temp_dir) / "out"
+            bundle_path.mkdir()
+            write_valid_incident(bundle_path)
+            rows = [
+                {
+                    "timestamp": "2026-06-30T09:00:00+09:00",
+                    "service_name": "quote-api",
+                    "service_path": "market_data",
+                    "dependency_type": "exchange",
+                    "metric_name": "request_count",
+                    "value": "5",
+                    "unit": "count",
+                },
+                {
+                    "timestamp": "2026-06-30T09:00:00+09:00",
+                    "service_name": "quote-api",
+                    "service_path": "market_data",
+                    "dependency_type": "exchange",
+                    "metric_name": "error_count",
+                    "value": "1",
+                    "unit": "count",
+                },
+            ]
+            for value in range(1, 21):
+                rows.append(
+                    {
+                        "timestamp": f"2026-06-30T09:00:{value:02}+09:00",
+                        "service_name": "quote-api",
+                        "service_path": "market_data",
+                        "dependency_type": "exchange",
+                        "metric_name": "latency_sample_ms",
+                        "value": str(value),
+                        "unit": "ms",
+                    }
+                )
+            write_metrics(bundle_path, rows)
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(output_path))
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            metric_summary = json.loads((output_path / "metric-summary.json").read_text(encoding="utf-8"))
+            self.assertEqual("metrics.csv", metric_summary["primary_telemetry"])
+            self.assertEqual(1, metric_summary["bucket_count"])
+            bucket = metric_summary["bucket_metrics"][0]
+            self.assertEqual("metrics.csv", bucket["source_for_m001_m007"])
+            self.assertEqual("2026-06-30T00:00:00+00:00", bucket["bucket_start_utc"])
+            self.assertEqual({"m_id": "M-001", "value": 5, "unit": "count"}, bucket["metrics"]["request_count"])
+            self.assertEqual({"m_id": "M-002", "value": 1, "unit": "count"}, bucket["metrics"]["error_count"])
+            self.assertEqual(
+                {"m_id": "M-003", "value": 0.083, "unit": "requests/second"},
+                bucket["metrics"]["throughput_rps"],
+            )
+            self.assertEqual(
+                {"m_id": "M-004", "value": 20.0, "unit": "percent"},
+                bucket["metrics"]["error_rate_pct"],
+            )
+            self.assertEqual(
+                {"m_id": "M-005", "value": 10, "unit": "ms", "sample_count": 20},
+                bucket["metrics"]["latency_p50_ms"],
+            )
+            self.assertEqual(
+                {"m_id": "M-006", "value": 19, "unit": "ms", "sample_count": 20},
+                bucket["metrics"]["latency_p95_ms"],
+            )
+            self.assertEqual(
+                {
+                    "m_id": "M-007",
+                    "value": None,
+                    "unit": "ms",
+                    "sample_count": 20,
+                    "reason_code": "insufficient_sample",
+                },
+                bucket["metrics"]["latency_p99_ms"],
+            )
+
+    def test_metric_summary_marks_zero_denominator_and_does_not_emit_raw_message(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            output_path = Path(temp_dir) / "out"
+            bundle_path.mkdir()
+            write_valid_incident(bundle_path)
+            write_logs(
+                bundle_path,
+                [
+                    valid_log_row(
+                        event_time="2026-06-30T09:00:05+09:00",
+                        observed_time="2026-06-30T09:00:06+09:00",
+                        message="DO_NOT_LEAK_METRIC_MESSAGE",
+                    )
+                ],
+            )
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(output_path))
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            serialized = (output_path / "metric-summary.json").read_text(encoding="utf-8")
+            self.assertNotIn("DO_NOT_LEAK_METRIC_MESSAGE", serialized)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            output_path = Path(temp_dir) / "out"
+            bundle_path.mkdir()
+            write_valid_incident(bundle_path)
+            write_metrics(
+                bundle_path,
+                [
+                    {
+                        "timestamp": "2026-06-30T09:00:05+09:00",
+                        "service_name": "quote-api",
+                        "service_path": "market_data",
+                        "dependency_type": "exchange",
+                        "metric_name": "latency_sample_ms",
+                        "value": "123",
+                        "unit": "ms",
+                    }
+                ],
+            )
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(output_path))
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            metric_summary = json.loads((output_path / "metric-summary.json").read_text(encoding="utf-8"))
+            bucket = metric_summary["bucket_metrics"][0]
+            self.assertEqual(
+                {
+                    "m_id": "M-004",
+                    "value": None,
+                    "unit": "percent",
+                    "reason_code": "zero_denominator",
+                },
+                bucket["metrics"]["error_rate_pct"],
+            )
+            self.assertEqual(
+                {"m_id": "M-005", "value": 123, "unit": "ms", "sample_count": 1},
+                bucket["metrics"]["latency_p50_ms"],
+            )
 
 
 if __name__ == "__main__":

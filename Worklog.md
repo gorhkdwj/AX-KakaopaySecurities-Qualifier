@@ -1756,3 +1756,61 @@
 - 다음 단계는 P4-09 기본 지표 계산 M-001~M-007입니다.
 - Notion 동기화 완료: Phase 4에 W-045 요약을 추가했고, fetch로 Phase 4 본문에 W-045 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
 - Git 동기화 완료: P4-08 산출물과 W-045 1차 기록을 커밋 `187630d7b5167a67459ae1801d86ef196ce33cea`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영합니다.
+
+### W-046 · Phase 4 P4-09 기본 지표 계산 M-001~M-007
+
+**요청**
+
+- 다음 작업을 이어서 진행합니다. 현재 순서상 P4-09 기본 지표 계산 M-001~M-007을 구현합니다.
+
+**수행 작업**
+
+- `engineering:testing-strategy` Skill을 참고해 이번 단계를 데이터 파이프라인 변환 검증으로 보았습니다.
+- `run_openbell.py`의 단계와 실행 상태를 `P4-09`, `basic_metrics_calculated_ready`로 갱신했습니다.
+- `metric-summary.json`을 새 중간 산출물로 추가했습니다.
+- M-001 `request_count`, M-002 `error_count`, M-003 `throughput_rps`, M-004 `error_rate_pct`, M-005 `latency_p50_ms`, M-006 `latency_p95_ms`, M-007 `latency_p99_ms`를 계산하도록 구현했습니다.
+- 수식과 `null` 기준은 `docs/openbell-guard-metrics-validation-contract.md`의 계약 `1.0.0`을 따랐습니다.
+- 비율·시간 값은 `Decimal`과 `ROUND_HALF_UP`으로 소수점 셋째 자리까지 반올림했습니다.
+- 지연시간 백분위는 nearest-rank 방식으로 계산했습니다.
+- 로그가 유효 분석 구간에 하나 이상 있으면 `logs.jsonl`을 M-001~M-007의 주 계산 소스로 사용하고, 로그가 없을 때만 `metrics.csv`를 주 계산 소스로 사용했습니다.
+- `openbell-cli-summary.json`에 metric summary 생성 여부, 계산한 M-ID, bucket 수와 정렬 기준을 요약했습니다.
+- `src/tests/test_run_openbell_cli.py`에 Golden fixture M-001~M-007 일치, metrics-only 계산, zero denominator, nearest-rank, raw message 비노출 테스트를 추가했습니다.
+- `src/skills/openbell-guard/SKILL.md`를 P4-09 현재 구현 범위와 한계에 맞게 갱신했습니다.
+- 이번 단계에서는 M-008~M-017, bucket 상태 판정, evidence·claim, 최종 `analysis.json` 생성을 구현하지 않았습니다.
+
+**변경 파일**
+
+- 수정: `src/skills/openbell-guard/scripts/run_openbell.py`
+- 수정: `src/tests/test_run_openbell_cli.py`
+- 수정: `src/skills/openbell-guard/SKILL.md`
+- 수정: `Troubleshootinglog.md`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `python -m unittest .\src\tests\test_run_openbell_cli.py -v`를 실행해 CLI·입력 검사·마스킹·행 단위 파서·버킷·기본 지표 테스트 24개가 모두 통과했습니다.
+- `python .\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\src\tests\fixtures\domestic-market-open-min\bundle --output .\out\p4-09-smoke`를 실행해 exit 0, `sanitized-bundle/`, `sanitization-report.md`, `record-summary.json`, `bucket-summary.json`, `metric-summary.json`, `openbell-cli-summary.json` 생성을 확인했습니다.
+- smoke 결과는 `stage=P4-09`, `run_status=basic_metrics_calculated_ready`, `metric_summary_created=true`, `metric bucket_count=3`, `analysis_json_created=false`, `primary_telemetry=logs.jsonl`였습니다.
+- smoke `metric-summary.json`에서 Golden fixture의 M-001~M-007 값과 일치함을 확인했습니다.
+- `python -m unittest discover -s .\src\tests -v`를 실행해 전체 테스트 36개가 모두 통과했습니다.
+- `python .\tools\preflight_check.py --quiet` 결과 `ok=5`, `warn=0`, `error=0`을 확인했습니다.
+- `python C:\Users\gorhk\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src`가 통과했습니다.
+- `python -X utf8 C:\Users\gorhk\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard`가 `Skill is valid!`로 통과했습니다.
+- `python -m py_compile .\src\skills\openbell-guard\scripts\run_openbell.py .\src\tests\test_contract_reference.py .\src\tests\test_domestic_market_open_min_fixture.py .\src\tests\test_run_openbell_cli.py .\tools\preflight_check.py`가 통과했습니다.
+- `out/p4-09-smoke` 전체 산출물을 `run_openbell.py`의 `find_sensitive_matches` 함수로 재검사했고 `no_sensitive_residue`를 확인했습니다.
+- `rg -n -i "sk-[A-Za-z0-9]|password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|secret[_-]?key|계좌|account_number" .\src\skills\openbell-guard\scripts .\src\skills\openbell-guard\SKILL.md .\src\tests\test_run_openbell_cli.py` 결과는 실제 비밀값이 아닌 보안 정규식 정의, SKILL 금지 설명, 테스트용 합성 secret 문자열만 포함했습니다.
+- `logs/` 파일은 수동 편집하지 않았습니다.
+
+**트러블슈팅**
+
+- T-010: 민감정보 잔존 검증 1차 명령에서 PowerShell 인라인 Python의 한글 절대 경로가 깨졌습니다. 제품 코드 오류가 아니라 검증 보조 명령의 경로 인코딩 문제였고, `Path.cwd()`와 상대 경로 방식으로 재실행해 `no_sensitive_residue`를 확인했습니다.
+
+**결과**
+
+- P4-09가 완료됐습니다. 이제 OpenBell Guard는 마스킹·행 검증·UTC 60초 버킷 정렬 이후, M-001~M-007 기본 지표를 `metric-summary.json`으로 계산합니다.
+- 새로운 중요 범위·아키텍처 결정은 없어 Decisionlog 새 항목은 만들지 않았습니다.
+- 현재 단계는 Phase 4의 P4-09/19이며, P4-08 시간·버킷 유틸리티 다음의 기본 지표 계산 단계입니다.
+- 남은 태스크는 P4-10~P4-19 약 10단계이며, 예상 작업량은 높음입니다.
+- 다음 단계는 P4-10 관측 지연과 기준 구간 대비 비교 M-008~M-013입니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-046 요약을 추가했고, fetch로 W-046 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+- Git 동기화: 대기 중입니다. 이 항목까지 커밋하고 원격 `origin/main`에 push합니다.

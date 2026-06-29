@@ -1,7 +1,8 @@
 """OpenBell Guard command-line entry point.
 
-P4-08 implements the shared CLI, bundle preflight gate, sanitizer,
-line-oriented telemetry parser, and 60-second bucket preparation:
+P4-09 implements the shared CLI, bundle preflight gate, sanitizer,
+line-oriented telemetry parser, 60-second bucket preparation, and the first
+basic metric calculation slice:
 
 - parse ``--bundle`` and ``--output``;
 - verify that the bundle is an existing, non-symlink directory;
@@ -12,9 +13,11 @@ line-oriented telemetry parser, and 60-second bucket preparation:
 - create a masked working copy and ``sanitization-report.md``.
 - parse sanitized ``logs.jsonl`` and ``metrics.csv`` rows into a record summary.
 - assign accepted in-window rows to UTC 60-second service-path buckets.
+- calculate M-001 through M-007 request, error, throughput, error-rate, and
+  latency percentile metrics into ``metric-summary.json``.
 
-It still does not compute metrics or create the final ``analysis.json``. Those
-behaviors belong to later Phase 4 steps and must keep using this entry point.
+It still does not create the final ``analysis.json``. That behavior belongs to
+later Phase 4 steps and must keep using this entry point.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ import json
 import math
 import re
 import sys
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -40,14 +44,18 @@ EXIT_CODES = {
     "output_validation_error": 5,
 }
 
-CLI_STAGE = "P4-08"
+CLI_STAGE = "P4-09"
 SUMMARY_FILENAME = "openbell-cli-summary.json"
 SANITIZED_BUNDLE_DIR = "sanitized-bundle"
 SANITIZATION_REPORT = "sanitization-report.md"
 RECORD_SUMMARY_FILENAME = "record-summary.json"
 BUCKET_SUMMARY_FILENAME = "bucket-summary.json"
+METRIC_SUMMARY_FILENAME = "metric-summary.json"
 SCHEMA_VERSION = "1.0"
 CONTRACT_VERSION = "1.0.0"
+BASIC_METRIC_IDS = ("M-001", "M-002", "M-003", "M-004", "M-005", "M-006", "M-007")
+ERROR_STATUSES = frozenset({"error", "timeout", "rejected"})
+DECIMAL_3_PLACES = Decimal("0.001")
 
 MIB = 1024 * 1024
 ALLOWED_BUNDLE_FILES = frozenset({"incident.json", "logs.jsonl", "metrics.csv", "service-map.json"})
@@ -167,10 +175,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="run_openbell.py",
         description=(
-            "Prepare an OpenBell Guard run directory. P4-08 validates the CLI, "
+            "Prepare an OpenBell Guard run directory. P4-09 validates the CLI, "
             "paths, bundle file contract, byte limits, incident metadata, and "
-            "creates a masked working copy, telemetry record summary, and bucket summary; "
-            "metric calculation is implemented later."
+            "creates a masked working copy, telemetry record summary, bucket summary, "
+            "and basic M-001 through M-007 metric summary."
         ),
     )
     parser.add_argument(
@@ -962,6 +970,57 @@ def isoformat_local(timestamp: datetime, timezone_name: str) -> str:
     return timestamp.astimezone(ZoneInfo(timezone_name)).isoformat()
 
 
+def decimal_from_number(value: int | float | Decimal) -> Decimal:
+    return Decimal(str(value))
+
+
+def round_decimal_3(value: int | float | Decimal) -> Decimal:
+    rounded = decimal_from_number(value).quantize(DECIMAL_3_PLACES, rounding=ROUND_HALF_UP)
+    if rounded == Decimal("-0.000"):
+        return Decimal("0.000")
+    return rounded
+
+
+def rounded_float(value: int | float | Decimal) -> float:
+    return float(round_decimal_3(value))
+
+
+def rounded_observation(value: int | float | Decimal) -> int | float:
+    rounded = round_decimal_3(value)
+    if rounded == rounded.to_integral_value():
+        return int(rounded)
+    return float(rounded)
+
+
+def metric_value(
+    *,
+    m_id: str,
+    value: int | float | None,
+    unit: str,
+    sample_count: int | None = None,
+    reason_code: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "m_id": m_id,
+        "value": value,
+        "unit": unit,
+    }
+    if sample_count is not None:
+        payload["sample_count"] = sample_count
+    if reason_code is not None:
+        payload["reason_code"] = reason_code
+    return payload
+
+
+def nearest_rank_value(samples: list[float], percentile: Decimal, minimum_sample_count: int) -> tuple[int | float | None, str | None]:
+    if len(samples) < minimum_sample_count:
+        return None, "insufficient_sample"
+    sorted_samples = sorted(samples)
+    rank = int(math.ceil(float(percentile * Decimal(len(sorted_samples)))))
+    rank = max(1, min(rank, len(sorted_samples)))
+    return rounded_observation(sorted_samples[rank - 1]), None
+
+
 def parse_logs_jsonl(text: str, incident_summary: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     counts = empty_record_counts()
     issues: list[dict[str, Any]] = []
@@ -1593,6 +1652,19 @@ def build_record_summary(
     }
 
 
+def combined_normalized_records(
+    *,
+    logs_result: dict[str, Any] | None,
+    metrics_result: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    normalized_records: list[dict[str, Any]] = []
+    if logs_result is not None:
+        normalized_records.extend(logs_result["normalized_records"])
+    if metrics_result is not None:
+        normalized_records.extend(metrics_result["normalized_records"])
+    return normalized_records
+
+
 def build_bucket_summary(
     *,
     logs_result: dict[str, Any] | None,
@@ -1602,11 +1674,7 @@ def build_bucket_summary(
     timezone_name = str(incident_summary["timezone"])
     bucket_groups: dict[tuple[str, str], dict[str, Any]] = {}
 
-    normalized_records: list[dict[str, Any]] = []
-    if logs_result is not None:
-        normalized_records.extend(logs_result["normalized_records"])
-    if metrics_result is not None:
-        normalized_records.extend(metrics_result["normalized_records"])
+    normalized_records = combined_normalized_records(logs_result=logs_result, metrics_result=metrics_result)
 
     for record in normalized_records:
         timestamp = record["event_time"] if record["source_type"] == "log" else record["timestamp"]
@@ -1651,9 +1719,150 @@ def build_bucket_summary(
     }
 
 
+def build_metric_summary(
+    *,
+    logs_result: dict[str, Any] | None,
+    metrics_result: dict[str, Any] | None,
+    incident_summary: dict[str, Any],
+    record_summary: dict[str, Any],
+) -> dict[str, Any]:
+    timezone_name = str(incident_summary["timezone"])
+    primary_telemetry = record_summary["primary_telemetry"]
+    groups: dict[tuple[str, str], dict[str, Any]] = {}
+    source_name = "logs.jsonl" if primary_telemetry == "logs.jsonl" else "metrics.csv"
+
+    for record in combined_normalized_records(logs_result=logs_result, metrics_result=metrics_result):
+        if primary_telemetry == "logs.jsonl" and record["source_type"] != "log":
+            continue
+        if primary_telemetry == "metrics.csv" and record["source_type"] != "metric":
+            continue
+
+        timestamp = record["event_time"] if record["source_type"] == "log" else record["timestamp"]
+        assert isinstance(timestamp, datetime)
+        bucket_start = utc_bucket_start(timestamp)
+        bucket_start_utc = isoformat_utc(bucket_start)
+        service_path = str(record["service_path"])
+        key = (service_path, bucket_start_utc)
+
+        if key not in groups:
+            groups[key] = {
+                "service_path": service_path,
+                "window_type": record["window_type"],
+                "bucket_start_utc": bucket_start_utc,
+                "bucket_start_local": isoformat_local(bucket_start, timezone_name),
+                "source_for_m001_m007": source_name,
+                "request_count": 0,
+                "error_count": 0,
+                "latency_samples": [],
+                "source_locations": [],
+            }
+        group = groups[key]
+        if group["window_type"] != record["window_type"]:
+            group["window_type"] = "mixed"
+        group["source_locations"].append(record["source_location"])
+
+        if record["source_type"] == "log":
+            group["request_count"] += 1
+            if record["status"] in ERROR_STATUSES:
+                group["error_count"] += 1
+            if record["latency_ms"] is not None:
+                group["latency_samples"].append(float(record["latency_ms"]))
+        else:
+            metric_name = record["metric_name"]
+            value = float(record["value"])
+            if metric_name == "request_count":
+                group["request_count"] += int(value)
+            elif metric_name == "error_count":
+                group["error_count"] += int(value)
+            elif metric_name == "latency_sample_ms":
+                group["latency_samples"].append(value)
+
+    bucket_metrics: list[dict[str, Any]] = []
+    for key in sorted(groups):
+        group = groups[key]
+        request_count = int(group["request_count"])
+        error_count = int(group["error_count"])
+        latency_samples = list(group["latency_samples"])
+        throughput = rounded_float(Decimal(request_count) / Decimal(60))
+
+        if request_count == 0:
+            error_rate_value: float | None = None
+            error_rate_reason = "zero_denominator"
+        else:
+            error_rate_value = rounded_float(Decimal(error_count) / Decimal(request_count) * Decimal(100))
+            error_rate_reason = None
+
+        latency_p50, latency_p50_reason = nearest_rank_value(latency_samples, Decimal("0.50"), 1)
+        latency_p95, latency_p95_reason = nearest_rank_value(latency_samples, Decimal("0.95"), 20)
+        latency_p99, latency_p99_reason = nearest_rank_value(latency_samples, Decimal("0.99"), 100)
+
+        bucket_metrics.append(
+            {
+                "service_path": group["service_path"],
+                "window_type": group["window_type"],
+                "bucket_start_utc": group["bucket_start_utc"],
+                "bucket_start_local": group["bucket_start_local"],
+                "source_for_m001_m007": group["source_for_m001_m007"],
+                "source_locations": sorted(group["source_locations"]),
+                "metrics": {
+                    "request_count": metric_value(m_id="M-001", value=request_count, unit="count"),
+                    "error_count": metric_value(m_id="M-002", value=error_count, unit="count"),
+                    "throughput_rps": metric_value(
+                        m_id="M-003",
+                        value=throughput,
+                        unit="requests/second",
+                    ),
+                    "error_rate_pct": metric_value(
+                        m_id="M-004",
+                        value=error_rate_value,
+                        unit="percent",
+                        reason_code=error_rate_reason,
+                    ),
+                    "latency_p50_ms": metric_value(
+                        m_id="M-005",
+                        value=latency_p50,
+                        unit="ms",
+                        sample_count=len(latency_samples),
+                        reason_code=latency_p50_reason,
+                    ),
+                    "latency_p95_ms": metric_value(
+                        m_id="M-006",
+                        value=latency_p95,
+                        unit="ms",
+                        sample_count=len(latency_samples),
+                        reason_code=latency_p95_reason,
+                    ),
+                    "latency_p99_ms": metric_value(
+                        m_id="M-007",
+                        value=latency_p99,
+                        unit="ms",
+                        sample_count=len(latency_samples),
+                        reason_code=latency_p99_reason,
+                    ),
+                },
+            }
+        )
+
+    return {
+        "schema_version": "0.1",
+        "stage": CLI_STAGE,
+        "status": record_summary["status"],
+        "contract_version": CONTRACT_VERSION,
+        "calculated_m_ids": list(BASIC_METRIC_IDS),
+        "primary_telemetry": primary_telemetry,
+        "bucket_size_seconds": 60,
+        "time_basis": "UTC",
+        "display_timezone": timezone_name,
+        "sort_order": ["service_path", "bucket_start_utc"],
+        "bucket_count": len(bucket_metrics),
+        "bucket_metrics": bucket_metrics,
+        "raw_excerpts_emitted": False,
+    }
+
+
 def parse_telemetry_records(
     *, sanitized_files: dict[str, str], preflight_summary: dict[str, Any]
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
     incident_summary = preflight_summary["incident"]
     service_map_summary = preflight_summary["service_map"]
 
@@ -1662,15 +1871,15 @@ def parse_telemetry_records(
     if "logs.jsonl" in sanitized_files:
         logs_result, issue = parse_logs_jsonl(sanitized_files["logs.jsonl"], incident_summary)
         if issue is not None:
-            return None, None, issue
+            return None, None, None, issue
     if "metrics.csv" in sanitized_files:
         metrics_result, issue = parse_metrics_csv(sanitized_files["metrics.csv"], incident_summary, service_map_summary)
         if issue is not None:
-            return None, None, issue
+            return None, None, None, issue
 
     summary = build_record_summary(logs_result=logs_result, metrics_result=metrics_result)
     if int(summary["accepted_in_window"]["total"]) == 0:
-        return None, None, issue_payload(
+        return None, None, None, issue_payload(
             exit_code=EXIT_CODES["input_error"],
             issue_code="INP008_NO_VALID_RECORD",
             message="No valid telemetry records remain inside the baseline or incident windows.",
@@ -1681,7 +1890,29 @@ def parse_telemetry_records(
         metrics_result=metrics_result,
         incident_summary=incident_summary,
     )
-    return summary, bucket_summary, None
+    metric_summary = build_metric_summary(
+        logs_result=logs_result,
+        metrics_result=metrics_result,
+        incident_summary=incident_summary,
+        record_summary=summary,
+    )
+    return summary, bucket_summary, metric_summary, None
+
+
+def write_metric_summary(*, output_path: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        (output_path / METRIC_SUMMARY_FILENAME).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        return issue_payload(
+            exit_code=EXIT_CODES["output_validation_error"],
+            issue_code="CLI016_METRIC_SUMMARY_WRITE_FAILED",
+            message="The metric summary file could not be written.",
+            argument="output",
+        )
+    return None
 
 
 def write_bucket_summary(*, output_path: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -1762,11 +1993,12 @@ def success_payload(
     sanitization_summary: dict[str, Any],
     record_summary: dict[str, Any],
     bucket_summary: dict[str, Any],
+    metric_summary: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "schema_version": "0.1",
         "stage": CLI_STAGE,
-        "run_status": "buckets_prepared_ready",
+        "run_status": "basic_metrics_calculated_ready",
         "exit_code": EXIT_CODES["ok"],
         "bundle": {
             "name": bundle_path.name,
@@ -1783,6 +2015,8 @@ def success_payload(
             "record_summary_created": True,
             "bucket_summary_file": BUCKET_SUMMARY_FILENAME,
             "bucket_summary_created": True,
+            "metric_summary_file": METRIC_SUMMARY_FILENAME,
+            "metric_summary_created": True,
             "analysis_json_created": False,
             "sanitization_report_created": True,
             "sanitization_report_file": SANITIZATION_REPORT,
@@ -1805,6 +2039,14 @@ def success_payload(
             "sort_order": bucket_summary["sort_order"],
             "raw_excerpts_emitted": False,
         },
+        "metrics": {
+            "metric_summary_file": METRIC_SUMMARY_FILENAME,
+            "calculated_m_ids": metric_summary["calculated_m_ids"],
+            "primary_telemetry": metric_summary["primary_telemetry"],
+            "bucket_count": metric_summary["bucket_count"],
+            "sort_order": metric_summary["sort_order"],
+            "raw_excerpts_emitted": False,
+        },
         "implemented_scope": [
             "parse --bundle and --output",
             "validate bundle directory existence",
@@ -1823,9 +2065,13 @@ def success_payload(
             "write M-014 record-summary.json without raw excerpts",
             "assign accepted in-window rows to UTC 60-second buckets",
             "write bucket-summary.json without raw excerpts",
+            "calculate M-001 through M-007 basic bucket metrics",
+            "write metric-summary.json without raw excerpts",
         ],
         "deferred_scope": [
-            "metric calculation",
+            "M-008 through M-017 metric calculation",
+            "bucket state and run state judgment",
+            "evidence and claim generation",
             "analysis.json generation",
         ],
         "exit_code_skeleton": EXIT_CODES,
@@ -1876,7 +2122,7 @@ def run(bundle_arg: str, output_arg: str) -> int:
     assert sanitization_summary is not None
     assert sanitized_files is not None
 
-    record_summary, bucket_summary, issue = parse_telemetry_records(
+    record_summary, bucket_summary, metric_summary, issue = parse_telemetry_records(
         sanitized_files=sanitized_files,
         preflight_summary=preflight_summary,
     )
@@ -1885,12 +2131,17 @@ def run(bundle_arg: str, output_arg: str) -> int:
         return int(issue["exit_code"])
     assert record_summary is not None
     assert bucket_summary is not None
+    assert metric_summary is not None
 
     issue = write_record_summary(output_path=output_path, payload=record_summary)
     if issue is not None:
         write_stderr_json(issue)
         return int(issue["exit_code"])
     issue = write_bucket_summary(output_path=output_path, payload=bucket_summary)
+    if issue is not None:
+        write_stderr_json(issue)
+        return int(issue["exit_code"])
+    issue = write_metric_summary(output_path=output_path, payload=metric_summary)
     if issue is not None:
         write_stderr_json(issue)
         return int(issue["exit_code"])
@@ -1901,6 +2152,7 @@ def run(bundle_arg: str, output_arg: str) -> int:
         sanitization_summary=sanitization_summary,
         record_summary=record_summary,
         bucket_summary=bucket_summary,
+        metric_summary=metric_summary,
     )
     issue = write_summary(output_path=output_path, payload=payload)
     if issue is not None:
