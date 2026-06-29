@@ -1850,4 +1850,4 @@
 - 기존 Worklog와 Troubleshootinglog의 절대경로는 당시 실제 검증 환경 기록이므로 원칙상 의미를 바꾸어 소급 수정하지 않고, 후속 문서에는 재사용하지 않는 방향이 안전합니다.
 - 새로운 중요 범위·아키텍처 결정은 없어 Decisionlog 새 항목은 만들지 않았습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-047 요약을 추가했고, fetch로 W-047 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
-- Git 동기화: 대기 중입니다. 이 경로 이식성 점검 기록을 커밋하고 원격 `origin/main`에 push합니다.
+- Git 동기화 완료: 경로 이식성 점검 W-047 기록을 커밋 `c313fe5c311c7111e27f27558fc1f91aef248d0b`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영합니다.
