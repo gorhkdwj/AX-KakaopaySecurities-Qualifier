@@ -1814,3 +1814,40 @@
 - 다음 단계는 P4-10 관측 지연과 기준 구간 대비 비교 M-008~M-013입니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-046 요약을 추가했고, fetch로 W-046 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
 - Git 동기화 완료: P4-09 산출물과 W-046/T-010 기록을 커밋 `37c539e0edb9cc67c21721e1c2f9d3fda5052bde`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영합니다.
+
+### W-047 · 실행 코드 경로 이식성 점검
+
+**요청**
+
+- 코드와 파일 경로에 절대경로가 들어가는 경우가 있는지, 다른 로컬에서도 구동하려면 모든 코드가 상대경로로 작성되어야 하는지 확인합니다.
+
+**수행 작업**
+
+- `src/`, `tools/`, `docs/`, `Worklog.md`, `Decisionlog.md`, `Troubleshootinglog.md`, `AGENTS.md`에서 Windows·Unix 계열 개인 절대경로 패턴을 검색했습니다.
+- `Path(__file__).resolve()`, `Path.cwd()`, `PROJECT_ROOT`처럼 실행 중 계산되는 경로와 하드코딩된 개인 절대경로를 구분했습니다.
+- `run_openbell.py`가 사용자 입력 `--bundle`, `--output`을 상대경로 또는 절대경로로 받을 수 있지만, 출력에는 논리 파일명과 source location만 기록하는 구조임을 확인했습니다.
+
+**변경 파일**
+
+- 수정: `Worklog.md`
+
+**검증**
+
+- `rg -n "C:\\\\|C:/|Users\\\\|/Users/|/home/|/root/|AppData" src tools --glob '!**/__pycache__/**'` 결과, 실행 코드와 도구에는 하드코딩된 개인 절대경로가 없었습니다.
+- 같은 검색을 문서와 기록 파일에 적용한 결과, `Worklog.md`, `Troubleshootinglog.md`, `docs/guides/plugin-build-guide.md`에 로컬 검증기 실행 예시용 `C:\Users\gorhk\...` 경로가 남아 있음을 확인했습니다.
+- 해당 경로들은 런타임 코드 경로가 아니며 최종 제출물의 `src/` 실행에는 직접 영향을 주지 않습니다.
+
+**판단 근거**
+
+- 제출용 실행 코드와 Skill 안내는 다른 로컬에서 재현 가능해야 하므로 개인 PC 절대경로를 하드코딩하면 안 됩니다.
+- 다만 `Path(__file__).resolve().parents[...]`처럼 현재 파일 위치를 기준으로 프로젝트 루트를 계산하는 방식은 설치 위치가 바뀌어도 동작하므로 이식 가능한 방식입니다.
+- 검증기 경로처럼 개발자 로컬에만 존재하는 절대경로는 최종 사용자 문서나 제출 README에 남기지 않는 것이 좋습니다.
+
+**결과**
+
+- 현재 `src/` 실행 코드에는 하드코딩된 개인 절대경로가 없어 다른 로컬 실행을 막는 즉시 수정 대상은 발견되지 않았습니다.
+- 제출 전 문서 정리 단계에서 `docs/guides/plugin-build-guide.md`의 로컬 검증기 절대경로 예시는 환경 변수 또는 상대적 설명으로 바꾸는 것이 좋습니다.
+- 기존 Worklog와 Troubleshootinglog의 절대경로는 당시 실제 검증 환경 기록이므로 원칙상 의미를 바꾸어 소급 수정하지 않고, 후속 문서에는 재사용하지 않는 방향이 안전합니다.
+- 새로운 중요 범위·아키텍처 결정은 없어 Decisionlog 새 항목은 만들지 않았습니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-047 요약을 추가했고, fetch로 W-047 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+- Git 동기화: 대기 중입니다. 이 경로 이식성 점검 기록을 커밋하고 원격 `origin/main`에 push합니다.
