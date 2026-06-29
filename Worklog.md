@@ -1914,3 +1914,64 @@
 - 다음 단계는 P4-11 bucket 상태 판정과 run 상태 요약입니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-048 요약을 추가하고 D-027 하위 페이지를 생성했으며, fetch로 두 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이고 D-027 URL은 `https://app.notion.com/p/38e05ea68bfc816b8e32e42579d6155c`입니다.
 - Git 동기화 완료: P4-10 산출물과 W-048/D-027/T-011/T-012 기록을 커밋 `dc6aa1c5925da7377f6ae5f9bbdd6fb2206b2a11`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영합니다.
+
+### W-049 · Phase 4 P4-11 bucket 상태 판정과 run 상태 요약
+
+**요청**
+
+- 다음 단계 구현을 진행합니다. 현재 순서상 P4-11 bucket 상태 판정과 run 상태 요약을 구현합니다.
+
+**수행 작업**
+
+- `run_openbell.py`의 단계명을 P4-11로 올렸습니다.
+- `incident.json`의 검증된 `thresholds` 값을 preflight summary에 보존하도록 했습니다.
+- 반올림 전 임계치 비교를 위해 nearest-rank raw 값을 계산하는 helper를 추가했습니다.
+- 설정된 threshold 기준으로 각 bucket을 `breach`, `healthy`, `unknown`으로 판정하는 로직을 추가했습니다.
+- 사고 구간에서 breach 2개 연속이면 `outage_start`, 장애 시작 후 healthy 2개 연속이면 `recovery_time`을 계산하도록 했습니다.
+- 서비스 경로별 `outage_detected`, `degradation_observed`, `healthy`, `unknown` 상태를 계산했습니다.
+- `state-summary.json`을 새 중간 산출물로 추가하고, `openbell-cli-summary.json`에 state 요약을 연결했습니다.
+- `src/tests/test_run_openbell_cli.py`에 fixture 상태 판정, 2개 연속 breach와 회복, threshold 누락 unknown/degraded 테스트를 추가했습니다.
+- `src/skills/openbell-guard/SKILL.md`를 P4-11 현재 구현 범위와 한계에 맞게 갱신했습니다.
+- D-028을 기록했습니다.
+- 이번 단계에서는 M-015~M-017, evidence·claim, 최종 `analysis.json` 생성을 구현하지 않았습니다.
+
+**변경 파일**
+
+- 수정: `src/skills/openbell-guard/scripts/run_openbell.py`
+- 수정: `src/tests/test_run_openbell_cli.py`
+- 수정: `src/skills/openbell-guard/SKILL.md`
+- 수정: `Decisionlog.md`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `python -m unittest .\src\tests\test_run_openbell_cli.py -v`를 실행해 CLI·입력 검사·마스킹·행 단위 파서·버킷·M-001~M-013·상태 판정 테스트 29개가 모두 통과했습니다.
+- `python -m unittest discover -s src\tests -v`를 실행해 전체 테스트 41개가 모두 통과했습니다.
+- `python tools/preflight_check.py --quiet` 결과 `ok=5`, `warn=0`, `error=0`을 확인했습니다.
+- `python -m py_compile .\src\skills\openbell-guard\scripts\run_openbell.py .\src\tests\test_run_openbell_cli.py`가 통과했습니다.
+- `python .\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\src\tests\fixtures\domestic-market-open-min\bundle --output .\out\p4-11-smoke`를 실행해 exit 0, `stage=P4-11`, `run_status=state_judgment_ready`, `state_summary_created=true`, `state.run_status=complete`, `bucket_state_counts={"breach":1,"healthy":2}`, `path_status_counts={"degradation_observed":1}`, `analysis_json_created=false`를 확인했습니다.
+- `python $env:USERPROFILE\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src`가 통과했습니다.
+- `python -X utf8 $env:USERPROFILE\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard`가 `Skill is valid!`로 통과했습니다.
+- `out/p4-11-smoke` 주요 산출물을 `run_openbell.py`의 `find_sensitive_matches` 함수로 재검사했고 `no_sensitive_residue`를 확인했습니다.
+- `logs/` 파일은 수동 편집하지 않았습니다.
+
+**트러블슈팅**
+
+- 새 T-ID는 없습니다.
+
+**판단 근거**
+
+- 상태 판정은 지표 수식과 성격이 다르므로 `metric-summary.json`에 직접 섞지 않고 `state-summary.json`으로 분리했습니다.
+- 임계치 비교는 계약대로 반올림 전 값을 사용해야 하므로 nearest-rank raw helper를 추가했습니다.
+- 임계치가 없거나 필요한 지표가 `null`이면 장애를 만들어내지 않고 `unknown`과 degraded limitation으로 남겼습니다.
+- `degradation_observed`는 breach가 있으나 연속 2개가 없어 outage가 확정되지 않은 상태로 유지했습니다.
+
+**결과**
+
+- P4-11이 완료됐습니다. 이제 OpenBell Guard는 임계치 기반 bucket 상태, 서비스 경로 상태, 장애 시작·회복 시각과 run 상태를 `state-summary.json`에 계산합니다.
+- 관련 결정: D-028 `상태 판정 결과를 state-summary.json 중간 산출물로 분리`
+- 현재 단계는 Phase 4의 P4-11/19이며, P4-10 관측 지연·기준 비교 다음의 상태 판정 단계입니다.
+- 남은 태스크는 P4-12~P4-19 약 8단계이며, 예상 작업량은 높음입니다.
+- 다음 단계는 P4-12 메트릭 fallback과 CPU·메모리 맥락 지표 M-015입니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-049 요약을 추가하고 D-028 하위 페이지를 생성했으며, fetch로 두 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이고 D-028 URL은 `https://app.notion.com/p/38e05ea68bfc814fb078c3ea0289142d`입니다.
+- Git 동기화: 대기 중입니다. P4-11 산출물과 기록을 커밋하고 원격 `origin/main`에 push합니다.

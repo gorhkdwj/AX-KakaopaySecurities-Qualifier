@@ -1,8 +1,8 @@
-"""CLI, bundle-preflight, sanitizer, row-parser, bucket, and metric tests for OpenBell Guard.
+"""CLI, bundle-preflight, sanitizer, row-parser, bucket, metric, and state tests for OpenBell Guard.
 
-P4-10 keeps the shared command-line entry point and adds M-001 through M-013
-bucket, observability-lag, and comparison metric calculation for sanitized logs
-and metrics. The script still must not create the final analysis outputs.
+P4-11 keeps the shared command-line entry point and adds threshold-based bucket
+and service-path state judgment on top of M-001 through M-013 metric calculation.
+The script still must not create the final analysis outputs.
 """
 
 from __future__ import annotations
@@ -196,8 +196,8 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertTrue(summary_path.exists())
 
             payload = json.loads(summary_path.read_text(encoding="utf-8"))
-            self.assertEqual("P4-10", payload["stage"])
-            self.assertEqual("observability_and_comparison_metrics_calculated_ready", payload["run_status"])
+            self.assertEqual("P4-11", payload["stage"])
+            self.assertEqual("state_judgment_ready", payload["run_status"])
             self.assertFalse(payload["bundle"]["raw_telemetry_records_parsed"])
             self.assertTrue(payload["bundle"]["sanitized_telemetry_records_parsed"])
             self.assertFalse(payload["bundle"]["raw_excerpts_emitted"])
@@ -206,6 +206,7 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertTrue(payload["outputs"]["record_summary_created"])
             self.assertTrue(payload["outputs"]["bucket_summary_created"])
             self.assertTrue(payload["outputs"]["metric_summary_created"])
+            self.assertTrue(payload["outputs"]["state_summary_created"])
             self.assertEqual("domestic-market-open-min", payload["bundle"]["preflight"]["incident"]["incident_id"])
             self.assertEqual(4, len(payload["bundle"]["preflight"]["files"]))
             self.assertTrue((output_path / "sanitized-bundle" / "logs.jsonl").exists())
@@ -213,6 +214,7 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertTrue((output_path / "record-summary.json").exists())
             self.assertTrue((output_path / "bucket-summary.json").exists())
             self.assertTrue((output_path / "metric-summary.json").exists())
+            self.assertTrue((output_path / "state-summary.json").exists())
             self.assertEqual("logs.jsonl", payload["telemetry"]["primary_telemetry"])
             self.assertEqual(9, payload["telemetry"]["record_counts"]["total"]["physical_record_count"])
             self.assertEqual(9, payload["telemetry"]["record_counts"]["total"]["accepted_record_count"])
@@ -239,6 +241,9 @@ class RunOpenBellCliTest(unittest.TestCase):
             )
             self.assertEqual(3, payload["metrics"]["bucket_count"])
             self.assertGreaterEqual(payload["metrics"]["comparison_metric_count"], 1)
+            self.assertEqual("complete", payload["state"]["run_status"])
+            self.assertEqual({"breach": 1, "healthy": 2}, payload["state"]["bucket_state_counts"])
+            self.assertEqual({"degradation_observed": 1}, payload["state"]["path_status_counts"])
 
             serialized = json.dumps(payload, ensure_ascii=False)
             self.assertNotIn(str(FIXTURE_BUNDLE), serialized)
@@ -413,7 +418,7 @@ class SanitizationTest(unittest.TestCase):
             self.assertEqual(original_logs, (bundle_path / "logs.jsonl").read_text(encoding="utf-8"))
 
             summary = json.loads((output_path / "openbell-cli-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-10", summary["stage"])
+            self.assertEqual("P4-11", summary["stage"])
             self.assertTrue(summary["outputs"]["sanitization_report_created"])
             self.assertFalse(summary["outputs"]["analysis_json_created"])
             self.assertEqual(7, summary["sanitization"]["total_redactions"])
@@ -618,7 +623,7 @@ class BucketSummaryTest(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             bucket_summary = json.loads((output_path / "bucket-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-10", bucket_summary["stage"])
+            self.assertEqual("P4-11", bucket_summary["stage"])
             self.assertEqual("UTC", bucket_summary["time_basis"])
             self.assertEqual("Asia/Seoul", bucket_summary["display_timezone"])
             self.assertEqual(["service_path", "bucket_start_utc"], bucket_summary["sort_order"])
@@ -684,7 +689,7 @@ class BasicMetricSummaryTest(unittest.TestCase):
             metric_summary = json.loads((output_path / "metric-summary.json").read_text(encoding="utf-8"))
             expected_analysis = json.loads(EXPECTED_ANALYSIS.read_text(encoding="utf-8"))
 
-            self.assertEqual("P4-10", metric_summary["stage"])
+            self.assertEqual("P4-11", metric_summary["stage"])
             self.assertEqual("logs.jsonl", metric_summary["primary_telemetry"])
             self.assertEqual(
                 [
@@ -1089,6 +1094,151 @@ class BasicMetricSummaryTest(unittest.TestCase):
                 },
                 bucket["metrics"]["ingestion_lag_p50_ms"],
             )
+
+
+class StateSummaryTest(unittest.TestCase):
+    def test_fixture_state_summary_matches_threshold_judgment_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "openbell-out"
+
+            completed = run_cli("--bundle", str(FIXTURE_BUNDLE), "--output", str(output_path))
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            state_summary = json.loads((output_path / "state-summary.json").read_text(encoding="utf-8"))
+            self.assertEqual("P4-11", state_summary["stage"])
+            self.assertEqual("complete", state_summary["run"]["status"])
+            self.assertEqual(0, state_summary["run"]["exit_code"])
+            self.assertEqual([], state_summary["run"]["limitations"])
+            self.assertFalse(state_summary["raw_excerpts_emitted"])
+
+            self.assertEqual({"breach": 1, "healthy": 2}, state_summary["bucket_state_counts"])
+            self.assertEqual({"degradation_observed": 1}, state_summary["path_status_counts"])
+            self.assertEqual(
+                [
+                    ("market_data", "2026-06-29T23:58:00+00:00", "healthy"),
+                    ("market_data", "2026-06-30T00:00:00+00:00", "breach"),
+                    ("market_data", "2026-06-30T00:01:00+00:00", "healthy"),
+                ],
+                [
+                    (bucket["service_path"], bucket["bucket_start_utc"], bucket["bucket_state"])
+                    for bucket in state_summary["bucket_states"]
+                ],
+            )
+            breach_bucket = state_summary["bucket_states"][1]
+            self.assertEqual(
+                [
+                    {
+                        "metric": "error_rate_pct",
+                        "threshold_key": "error_rate_pct_max",
+                        "value": 66.667,
+                        "threshold": 50,
+                        "operator": ">",
+                    }
+                ],
+                breach_bucket["breach_reasons"],
+            )
+            self.assertEqual(
+                {
+                    "service_path": "market_data",
+                    "status": "degradation_observed",
+                    "outage_start": None,
+                    "recovery_time": None,
+                    "outage_duration_seconds": None,
+                    "ongoing_at_window_end": False,
+                    "evaluated_bucket_count": 3,
+                    "incident_bucket_count": 2,
+                    "breach_bucket_count": 1,
+                    "unknown_bucket_count": 0,
+                    "healthy_bucket_count": 2,
+                },
+                state_summary["service_paths"][0],
+            )
+
+    def test_state_summary_detects_two_consecutive_breach_and_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            output_path = Path(temp_dir) / "out"
+            bundle_path.mkdir()
+            incident = dict(VALID_INCIDENT)
+            incident["incident_window"] = {
+                "start": "2026-06-30T09:00:00+09:00",
+                "end": "2026-06-30T09:04:00+09:00",
+            }
+            write_valid_incident(bundle_path, incident)
+            write_logs(
+                bundle_path,
+                [
+                    valid_log_row(event_time="2026-06-30T08:58:05+09:00", status="ok", latency_ms=50),
+                    valid_log_row(event_time="2026-06-30T08:58:25+09:00", status="ok", latency_ms=50),
+                    valid_log_row(event_time="2026-06-30T09:00:05+09:00", status="error", latency_ms=50),
+                    valid_log_row(event_time="2026-06-30T09:00:25+09:00", status="timeout", latency_ms=50),
+                    valid_log_row(event_time="2026-06-30T09:01:05+09:00", status="error", latency_ms=50),
+                    valid_log_row(event_time="2026-06-30T09:01:25+09:00", status="timeout", latency_ms=50),
+                    valid_log_row(event_time="2026-06-30T09:02:05+09:00", status="ok", latency_ms=50),
+                    valid_log_row(event_time="2026-06-30T09:02:25+09:00", status="ok", latency_ms=50),
+                    valid_log_row(event_time="2026-06-30T09:03:05+09:00", status="ok", latency_ms=50),
+                    valid_log_row(event_time="2026-06-30T09:03:25+09:00", status="ok", latency_ms=50),
+                ],
+            )
+            write_metrics(
+                bundle_path,
+                [
+                    {
+                        "timestamp": "2026-06-30T09:00:00+09:00",
+                        "service_name": "quote-api",
+                        "service_path": "market_data",
+                        "dependency_type": "exchange",
+                        "metric_name": "cpu_utilization_pct",
+                        "value": "10",
+                        "unit": "percent",
+                    }
+                ],
+            )
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(output_path))
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            state_summary = json.loads((output_path / "state-summary.json").read_text(encoding="utf-8"))
+            path_state = state_summary["service_paths"][0]
+            self.assertEqual("outage_detected", path_state["status"])
+            self.assertEqual("2026-06-30T00:00:00+00:00", path_state["outage_start"])
+            self.assertEqual("2026-06-30T00:02:00+00:00", path_state["recovery_time"])
+            self.assertEqual(120, path_state["outage_duration_seconds"])
+            self.assertFalse(path_state["ongoing_at_window_end"])
+            self.assertEqual({"breach": 2, "healthy": 3}, state_summary["bucket_state_counts"])
+
+    def test_state_summary_marks_missing_threshold_as_unknown_and_degraded(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            output_path = Path(temp_dir) / "out"
+            bundle_path.mkdir()
+            incident = dict(VALID_INCIDENT)
+            incident.pop("thresholds")
+            write_valid_incident(bundle_path, incident)
+            write_logs(
+                bundle_path,
+                [
+                    valid_log_row(event_time="2026-06-30T08:58:05+09:00", status="ok"),
+                    valid_log_row(event_time="2026-06-30T09:00:05+09:00", status="ok"),
+                    valid_log_row(event_time="2026-06-30T09:01:05+09:00", status="ok"),
+                ],
+            )
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(output_path))
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            state_summary = json.loads((output_path / "state-summary.json").read_text(encoding="utf-8"))
+            self.assertEqual("degraded", state_summary["run"]["status"])
+            self.assertEqual({"unknown": 3}, state_summary["bucket_state_counts"])
+            self.assertEqual("unknown", state_summary["service_paths"][0]["status"])
+            self.assertIn(
+                {
+                    "reason_code": "threshold_or_sample_incomplete",
+                    "message": "At least one bucket could not be fully evaluated against configured thresholds.",
+                },
+                state_summary["run"]["limitations"],
+            )
+            self.assertEqual("threshold_missing", state_summary["bucket_states"][0]["unknown_reasons"][0]["reason_code"])
 
 
 if __name__ == "__main__":
