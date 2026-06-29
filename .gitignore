@@ -1,0 +1,29 @@
+# Local conversation logs are required for final submission, but should not be
+# pushed to GitHub by default because they may contain full raw conversations.
+logs/
+
+# Local AI/IDE/session state
+.agents/
+.claude/
+.codex/
+.vscode/
+
+# Python caches and test/build outputs
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+
+# Local environment and secrets
+.env
+.env.*
+*.pem
+*.key
+*.token
+
+# Packaged submission artifacts are generated later.
+submission.zip
+submission/

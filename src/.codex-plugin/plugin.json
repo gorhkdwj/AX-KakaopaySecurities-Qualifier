@@ -1,0 +1,6 @@
+{
+  "name": "openbell-guard",
+  "version": "0.1.0",
+  "description": "Analyze brokerage telemetry for market-open and external-dependency incidents with evidence-backed reports.",
+  "skills": "./skills/"
+}
