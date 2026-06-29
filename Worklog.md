@@ -1699,3 +1699,60 @@
 - 다음 단계는 P4-08 서비스 경로 정규화와 60초 버킷 기반 구조 준비입니다.
 - Notion 동기화 완료: Phase 4에 W-044 요약을 추가했고, fetch로 Phase 4 본문에 W-044 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
 - Git 동기화 완료: P4-07 산출물과 W-044 1차 기록을 커밋 `174f7a17c3e1b4babe0c08985ab31daa4dabfe30`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영합니다.
+
+### W-045 · Phase 4 P4-08 시간·버킷 유틸리티
+
+**요청**
+
+- 다음 작업을 이어서 진행합니다. 현재 순서상 P4-08 서비스 경로 정규화와 60초 버킷 기반 구조 준비를 구현합니다.
+
+**수행 작업**
+
+- `engineering:testing-strategy` Skill을 참고해 이번 단계를 데이터 파이프라인의 시간 경계, UTC 변환, 정렬 규칙과 원문 비노출 테스트로 한정했습니다.
+- `run_openbell.py`의 단계와 실행 상태를 `P4-08`, `buckets_prepared_ready`로 갱신했습니다.
+- 계약 §2.1~§2.2에 따라 입력 시각을 UTC로 변환하고, UTC 기준 분 단위 내림으로 60초 버킷 시작 시각을 계산하는 유틸리티를 추가했습니다.
+- P4-07에서 받아들인 구간 내 로그·메트릭 행을 내부 정규화 레코드로 유지하고, `service_path × bucket_start_utc` 기준으로 그룹화했습니다.
+- `bucket-summary.json`을 새 산출물로 추가했습니다.
+- `bucket-summary.json`에는 `bucket_start_utc`, `bucket_start_local`, `bucket_size_seconds=60`, `window_type`, source별 행 수와 source location만 기록하고 원문 메시지나 레코드 본문은 기록하지 않도록 했습니다.
+- 버킷 출력은 계약대로 `service_path`, `bucket_start_utc` 오름차순으로 정렬했습니다.
+- `openbell-cli-summary.json`에 bucket summary 생성 여부, 버킷 수, 시간 기준, 표시 시간대와 정렬 기준을 요약했습니다.
+- `src/tests/test_run_openbell_cli.py`에 UTC floor, KST 표시, `[start,end)` 경계, 정렬 순서, metric service-map 보완 후 버킷 포함, bucket summary 원문 비노출 테스트를 추가했습니다.
+- `src/skills/openbell-guard/SKILL.md`를 P4-08 현재 구현 범위와 한계에 맞게 갱신했습니다.
+- 이번 단계에서는 M-001~M-013 지표 계산, MET001 버킷 불일치 계산, bucket 상태 판정, 최종 `analysis.json` 생성을 구현하지 않았습니다.
+
+**변경 파일**
+
+- 수정: `src/skills/openbell-guard/scripts/run_openbell.py`
+- 수정: `src/tests/test_run_openbell_cli.py`
+- 수정: `src/skills/openbell-guard/SKILL.md`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `python -m unittest .\src\tests\test_run_openbell_cli.py -v`를 실행해 CLI·사전 검사·마스킹·행 단위 파서·버킷 테스트 21개가 모두 통과했습니다.
+- `python .\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\src\tests\fixtures\domestic-market-open-min\bundle --output .\out\p4-08-smoke`를 실행해 exit 0, `sanitized-bundle/`, `sanitization-report.md`, `record-summary.json`, `bucket-summary.json`, `openbell-cli-summary.json` 생성을 확인했습니다.
+- smoke 결과는 `stage=P4-08`, `run_status=buckets_prepared_ready`, `bucket_summary_created=true`, `bucket_count=3`, `analysis_json_created=false`, `primary_telemetry=logs.jsonl`였습니다.
+- smoke `bucket-summary.json`에서 UTC 버킷 `2026-06-29T23:58:00+00:00`, `2026-06-30T00:00:00+00:00`, `2026-06-30T00:01:00+00:00`와 KST 표시 시각, source별 행 수를 확인했습니다.
+- `python -m unittest discover -s .\src\tests -v`를 실행해 전체 테스트 33개가 모두 통과했습니다.
+- `python .\tools\preflight_check.py --quiet` 결과 `ok=5`, `warn=0`, `error=0`을 확인했습니다.
+- `python C:\Users\gorhk\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src`가 통과했습니다.
+- `python -X utf8 C:\Users\gorhk\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard`가 `Skill is valid!`로 통과했습니다.
+- `python -m py_compile .\src\skills\openbell-guard\scripts\run_openbell.py .\src\tests\test_contract_reference.py .\src\tests\test_domestic_market_open_min_fixture.py .\src\tests\test_run_openbell_cli.py .\tools\preflight_check.py`가 통과했습니다.
+- `run_openbell.py`의 `find_sensitive_matches` 함수를 import해 `out/p4-08-smoke` 전체 산출물을 재검사했고, `no_sensitive_residue` 결과로 민감정보 패턴 잔존이 없음을 확인했습니다.
+- `rg -n -i "sk-[A-Za-z0-9]|password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|secret[_-]?key|계좌|account_number" .\src\skills\openbell-guard\scripts .\src\skills\openbell-guard\SKILL.md .\src\tests\test_run_openbell_cli.py` 결과는 실제 비밀값이 아니라 보안 정규식 정의, SKILL 금지 설명, 테스트용 seeded synthetic secret 문자열만 잡았습니다.
+- `logs/` 파일은 수동 편집하지 않았습니다.
+
+**트러블슈팅**
+
+- 새 T-ID 없음.
+- 이번 단계에서 코드·테스트 오류는 발생하지 않았습니다.
+
+**결과**
+
+- P4-08이 완료됐습니다. 이제 OpenBell Guard는 마스킹·행 검증을 통과한 레코드를 UTC 60초 버킷으로 정렬해 다음 지표 계산 단계의 공통 grain을 제공합니다.
+- 새로운 중요한 범위·아키텍처 결정은 없어 Decisionlog 새 항목은 만들지 않았습니다.
+- 현재 단계는 Phase 4의 P4-08/19이며, P4-07 행 단위 파서 다음의 시간·버킷 유틸리티 단계입니다.
+- 남은 태스크는 P4-09~P4-19 약 11단계이며, 예상 작업량은 높음입니다.
+- 다음 단계는 P4-09 기본 지표 계산 M-001~M-007입니다.
+- Notion 동기화 완료: Phase 4에 W-045 요약을 추가했고, fetch로 Phase 4 본문에 W-045 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+- Git 동기화 대기: W-045 산출물과 기록을 커밋·push해야 합니다.

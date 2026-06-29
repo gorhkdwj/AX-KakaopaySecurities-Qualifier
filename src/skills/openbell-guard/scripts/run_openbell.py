@@ -1,7 +1,7 @@
 """OpenBell Guard command-line entry point.
 
-P4-07 implements the shared CLI, bundle preflight gate, sanitizer, and
-line-oriented telemetry parser:
+P4-08 implements the shared CLI, bundle preflight gate, sanitizer,
+line-oriented telemetry parser, and 60-second bucket preparation:
 
 - parse ``--bundle`` and ``--output``;
 - verify that the bundle is an existing, non-symlink directory;
@@ -11,6 +11,7 @@ line-oriented telemetry parser:
 - validate the ``incident.json`` contract and optional ``service-map.json``.
 - create a masked working copy and ``sanitization-report.md``.
 - parse sanitized ``logs.jsonl`` and ``metrics.csv`` rows into a record summary.
+- assign accepted in-window rows to UTC 60-second service-path buckets.
 
 It still does not compute metrics or create the final ``analysis.json``. Those
 behaviors belong to later Phase 4 steps and must keep using this entry point.
@@ -25,7 +26,7 @@ import json
 import math
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -39,11 +40,12 @@ EXIT_CODES = {
     "output_validation_error": 5,
 }
 
-CLI_STAGE = "P4-07"
+CLI_STAGE = "P4-08"
 SUMMARY_FILENAME = "openbell-cli-summary.json"
 SANITIZED_BUNDLE_DIR = "sanitized-bundle"
 SANITIZATION_REPORT = "sanitization-report.md"
 RECORD_SUMMARY_FILENAME = "record-summary.json"
+BUCKET_SUMMARY_FILENAME = "bucket-summary.json"
 SCHEMA_VERSION = "1.0"
 CONTRACT_VERSION = "1.0.0"
 
@@ -165,9 +167,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="run_openbell.py",
         description=(
-            "Prepare an OpenBell Guard run directory. P4-07 validates the CLI, "
+            "Prepare an OpenBell Guard run directory. P4-08 validates the CLI, "
             "paths, bundle file contract, byte limits, incident metadata, and "
-            "creates a masked working copy plus a telemetry record summary; "
+            "creates a masked working copy, telemetry record summary, and bucket summary; "
             "metric calculation is implemented later."
         ),
     )
@@ -926,7 +928,7 @@ def is_valid_trimmed_string(value: Any, *, max_length: int) -> bool:
     return isinstance(value, str) and 1 <= len(value.strip()) <= max_length
 
 
-def is_in_analysis_window(timestamp: datetime, incident_summary: dict[str, Any]) -> bool:
+def analysis_window_type(timestamp: datetime, incident_summary: dict[str, Any]) -> str | None:
     baseline_window = incident_summary["baseline_window"]
     incident_window = incident_summary["incident_window"]
     baseline_start = parse_row_datetime(baseline_window["start"])
@@ -937,13 +939,34 @@ def is_in_analysis_window(timestamp: datetime, incident_summary: dict[str, Any])
     assert baseline_end is not None
     assert incident_start is not None
     assert incident_end is not None
-    return (baseline_start <= timestamp < baseline_end) or (incident_start <= timestamp < incident_end)
+    if baseline_start <= timestamp < baseline_end:
+        return "baseline"
+    if incident_start <= timestamp < incident_end:
+        return "incident"
+    return None
+
+
+def is_in_analysis_window(timestamp: datetime, incident_summary: dict[str, Any]) -> bool:
+    return analysis_window_type(timestamp, incident_summary) is not None
+
+
+def utc_bucket_start(timestamp: datetime) -> datetime:
+    return timestamp.astimezone(timezone.utc).replace(second=0, microsecond=0)
+
+
+def isoformat_utc(timestamp: datetime) -> str:
+    return timestamp.astimezone(timezone.utc).isoformat()
+
+
+def isoformat_local(timestamp: datetime, timezone_name: str) -> str:
+    return timestamp.astimezone(ZoneInfo(timezone_name)).isoformat()
 
 
 def parse_logs_jsonl(text: str, incident_summary: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     counts = empty_record_counts()
     issues: list[dict[str, Any]] = []
     accepted_in_window_count = 0
+    normalized_records: list[dict[str, Any]] = []
 
     for line_number, line in enumerate(text.splitlines(), start=1):
         counts["physical_record_count"] += 1
@@ -1062,6 +1085,15 @@ def parse_logs_jsonl(text: str, incident_summary: dict[str, Any]) -> tuple[dict[
             continue
 
         counts["accepted_record_count"] += 1
+        assert isinstance(payload["service_name"], str)
+        assert isinstance(payload["service_path"], str)
+        assert isinstance(payload["status"], str)
+        service_name = payload["service_name"].strip()
+        service_path = payload["service_path"]
+        status = payload["status"]
+        parsed_observed_time: datetime | None = None
+        latency_value: float | None = None
+        dependency_type_value: str | None = None
 
         for field in sorted(set(payload) - LOG_ALLOWED_FIELDS):
             issues.append(
@@ -1078,6 +1110,7 @@ def parse_logs_jsonl(text: str, incident_summary: dict[str, Any]) -> tuple[dict[
         if observed_time is not None:
             parsed_observed_time = parse_row_datetime(observed_time)
             if parsed_observed_time is None or parsed_observed_time < event_time:
+                parsed_observed_time = None
                 counts["field_dropped_count"] += 1
                 issues.append(
                     record_issue(
@@ -1091,32 +1124,39 @@ def parse_logs_jsonl(text: str, incident_summary: dict[str, Any]) -> tuple[dict[
                 )
 
         latency_ms = payload.get("latency_ms")
-        if latency_ms is not None and (not is_finite_number(latency_ms) or float(latency_ms) < 0):
-            counts["field_dropped_count"] += 1
-            issues.append(
-                record_issue(
-                    issue_code="FLD001_OPTIONAL_DROPPED",
-                    source_file="logs.jsonl",
-                    location=location,
-                    field="latency_ms",
-                    message="latency_ms was present but invalid, so the field was dropped.",
-                    severity="degraded",
+        if latency_ms is not None:
+            if not is_finite_number(latency_ms) or float(latency_ms) < 0:
+                counts["field_dropped_count"] += 1
+                issues.append(
+                    record_issue(
+                        issue_code="FLD001_OPTIONAL_DROPPED",
+                        source_file="logs.jsonl",
+                        location=location,
+                        field="latency_ms",
+                        message="latency_ms was present but invalid, so the field was dropped.",
+                        severity="degraded",
+                    )
                 )
-            )
+            else:
+                latency_value = float(latency_ms)
 
         dependency_type = payload.get("dependency_type")
-        if dependency_type is not None and dependency_type not in STANDARD_DEPENDENCY_TYPES:
-            counts["field_dropped_count"] += 1
-            issues.append(
-                record_issue(
-                    issue_code="FLD001_OPTIONAL_DROPPED",
-                    source_file="logs.jsonl",
-                    location=location,
-                    field="dependency_type",
-                    message="dependency_type was present but invalid, so the field was dropped.",
-                    severity="degraded",
+        if dependency_type is not None:
+            if dependency_type not in STANDARD_DEPENDENCY_TYPES:
+                counts["field_dropped_count"] += 1
+                issues.append(
+                    record_issue(
+                        issue_code="FLD001_OPTIONAL_DROPPED",
+                        source_file="logs.jsonl",
+                        location=location,
+                        field="dependency_type",
+                        message="dependency_type was present but invalid, so the field was dropped.",
+                        severity="degraded",
+                    )
                 )
-            )
+            else:
+                assert isinstance(dependency_type, str)
+                dependency_type_value = dependency_type
 
         for field, max_length in (("trace_id", 128), ("log_type", 64)):
             if field in payload and payload[field] is not None and not is_valid_trimmed_string(
@@ -1162,8 +1202,24 @@ def parse_logs_jsonl(text: str, incident_summary: dict[str, Any]) -> tuple[dict[
                 )
             )
 
-        if is_in_analysis_window(event_time, incident_summary):
+        window_type = analysis_window_type(event_time, incident_summary)
+        if window_type is not None:
             accepted_in_window_count += 1
+            normalized_records.append(
+                {
+                    "source_type": "log",
+                    "source_file": "logs.jsonl",
+                    "source_location": location,
+                    "event_time": event_time,
+                    "observed_time": parsed_observed_time,
+                    "service_name": service_name,
+                    "service_path": service_path,
+                    "dependency_type": dependency_type_value,
+                    "status": status,
+                    "latency_ms": latency_value,
+                    "window_type": window_type,
+                }
+            )
         else:
             counts["outside_analysis_window_count"] += 1
             issues.append(
@@ -1180,6 +1236,7 @@ def parse_logs_jsonl(text: str, incident_summary: dict[str, Any]) -> tuple[dict[
         "counts": counts,
         "issues": issues,
         "accepted_in_window_count": accepted_in_window_count,
+        "normalized_records": normalized_records,
     }, None
 
 
@@ -1215,6 +1272,7 @@ def parse_metrics_csv(
     counts = empty_record_counts()
     issues: list[dict[str, Any]] = []
     accepted_in_window_count = 0
+    normalized_records: list[dict[str, Any]] = []
 
     stream = io.StringIO(text)
     reader = csv.DictReader(stream, strict=True)
@@ -1407,6 +1465,7 @@ def parse_metrics_csv(
                 continue
 
             dependency_type = row.get("dependency_type")
+            dependency_type_value: str | None = None
             if dependency_type:
                 dependency_type = dependency_type.strip()
                 if dependency_type not in STANDARD_DEPENDENCY_TYPES:
@@ -1421,10 +1480,28 @@ def parse_metrics_csv(
                             severity="degraded",
                         )
                     )
+                else:
+                    dependency_type_value = dependency_type
 
             counts["accepted_record_count"] += 1
-            if is_in_analysis_window(timestamp, incident_summary):
+            window_type = analysis_window_type(timestamp, incident_summary)
+            if window_type is not None:
                 accepted_in_window_count += 1
+                normalized_records.append(
+                    {
+                        "source_type": "metric",
+                        "source_file": "metrics.csv",
+                        "source_location": location,
+                        "timestamp": timestamp,
+                        "service_name": service_name,
+                        "service_path": service_path,
+                        "dependency_type": dependency_type_value,
+                        "metric_name": metric_name,
+                        "value": value,
+                        "unit": unit,
+                        "window_type": window_type,
+                    }
+                )
             else:
                 counts["outside_analysis_window_count"] += 1
                 issues.append(
@@ -1452,6 +1529,7 @@ def parse_metrics_csv(
         "counts": counts,
         "issues": issues,
         "accepted_in_window_count": accepted_in_window_count,
+        "normalized_records": normalized_records,
     }, None
 
 
@@ -1515,9 +1593,67 @@ def build_record_summary(
     }
 
 
+def build_bucket_summary(
+    *,
+    logs_result: dict[str, Any] | None,
+    metrics_result: dict[str, Any] | None,
+    incident_summary: dict[str, Any],
+) -> dict[str, Any]:
+    timezone_name = str(incident_summary["timezone"])
+    bucket_groups: dict[tuple[str, str], dict[str, Any]] = {}
+
+    normalized_records: list[dict[str, Any]] = []
+    if logs_result is not None:
+        normalized_records.extend(logs_result["normalized_records"])
+    if metrics_result is not None:
+        normalized_records.extend(metrics_result["normalized_records"])
+
+    for record in normalized_records:
+        timestamp = record["event_time"] if record["source_type"] == "log" else record["timestamp"]
+        assert isinstance(timestamp, datetime)
+        bucket_start = utc_bucket_start(timestamp)
+        bucket_start_utc = isoformat_utc(bucket_start)
+        service_path = str(record["service_path"])
+        key = (service_path, bucket_start_utc)
+
+        if key not in bucket_groups:
+            bucket_groups[key] = {
+                "service_path": service_path,
+                "bucket_start_utc": bucket_start_utc,
+                "bucket_start_local": isoformat_local(bucket_start, timezone_name),
+                "bucket_size_seconds": 60,
+                "window_type": record["window_type"],
+                "source_counts": {"logs.jsonl": 0, "metrics.csv": 0},
+                "source_locations": [],
+            }
+        bucket = bucket_groups[key]
+        if bucket["window_type"] != record["window_type"]:
+            bucket["window_type"] = "mixed"
+        source_file = str(record["source_file"])
+        bucket["source_counts"][source_file] += 1
+        bucket["source_locations"].append(record["source_location"])
+
+    buckets = [bucket_groups[key] for key in sorted(bucket_groups)]
+    for bucket in buckets:
+        bucket["source_locations"] = sorted(bucket["source_locations"])
+
+    return {
+        "schema_version": "0.1",
+        "stage": CLI_STAGE,
+        "status": "success",
+        "bucket_size_seconds": 60,
+        "time_basis": "UTC",
+        "display_timezone": timezone_name,
+        "sort_order": ["service_path", "bucket_start_utc"],
+        "bucket_count": len(buckets),
+        "buckets": buckets,
+        "raw_excerpts_emitted": False,
+    }
+
+
 def parse_telemetry_records(
     *, sanitized_files: dict[str, str], preflight_summary: dict[str, Any]
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
     incident_summary = preflight_summary["incident"]
     service_map_summary = preflight_summary["service_map"]
 
@@ -1526,21 +1662,42 @@ def parse_telemetry_records(
     if "logs.jsonl" in sanitized_files:
         logs_result, issue = parse_logs_jsonl(sanitized_files["logs.jsonl"], incident_summary)
         if issue is not None:
-            return None, issue
+            return None, None, issue
     if "metrics.csv" in sanitized_files:
         metrics_result, issue = parse_metrics_csv(sanitized_files["metrics.csv"], incident_summary, service_map_summary)
         if issue is not None:
-            return None, issue
+            return None, None, issue
 
     summary = build_record_summary(logs_result=logs_result, metrics_result=metrics_result)
     if int(summary["accepted_in_window"]["total"]) == 0:
-        return None, issue_payload(
+        return None, None, issue_payload(
             exit_code=EXIT_CODES["input_error"],
             issue_code="INP008_NO_VALID_RECORD",
             message="No valid telemetry records remain inside the baseline or incident windows.",
             argument="bundle",
         )
-    return summary, None
+    bucket_summary = build_bucket_summary(
+        logs_result=logs_result,
+        metrics_result=metrics_result,
+        incident_summary=incident_summary,
+    )
+    return summary, bucket_summary, None
+
+
+def write_bucket_summary(*, output_path: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        (output_path / BUCKET_SUMMARY_FILENAME).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        return issue_payload(
+            exit_code=EXIT_CODES["output_validation_error"],
+            issue_code="CLI015_BUCKET_SUMMARY_WRITE_FAILED",
+            message="The bucket summary file could not be written.",
+            argument="output",
+        )
+    return None
 
 
 def write_record_summary(*, output_path: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -1604,11 +1761,12 @@ def success_payload(
     preflight_summary: dict[str, Any],
     sanitization_summary: dict[str, Any],
     record_summary: dict[str, Any],
+    bucket_summary: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "schema_version": "0.1",
         "stage": CLI_STAGE,
-        "run_status": "records_parsed_ready",
+        "run_status": "buckets_prepared_ready",
         "exit_code": EXIT_CODES["ok"],
         "bundle": {
             "name": bundle_path.name,
@@ -1623,6 +1781,8 @@ def success_payload(
             "sanitized_bundle_dir": SANITIZED_BUNDLE_DIR,
             "record_summary_file": RECORD_SUMMARY_FILENAME,
             "record_summary_created": True,
+            "bucket_summary_file": BUCKET_SUMMARY_FILENAME,
+            "bucket_summary_created": True,
             "analysis_json_created": False,
             "sanitization_report_created": True,
             "sanitization_report_file": SANITIZATION_REPORT,
@@ -1634,6 +1794,15 @@ def success_payload(
             "record_counts": record_summary["record_counts"],
             "accepted_in_window": record_summary["accepted_in_window"],
             "issue_counts": record_summary["issue_counts"],
+            "raw_excerpts_emitted": False,
+        },
+        "buckets": {
+            "bucket_summary_file": BUCKET_SUMMARY_FILENAME,
+            "bucket_size_seconds": bucket_summary["bucket_size_seconds"],
+            "time_basis": bucket_summary["time_basis"],
+            "display_timezone": bucket_summary["display_timezone"],
+            "bucket_count": bucket_summary["bucket_count"],
+            "sort_order": bucket_summary["sort_order"],
             "raw_excerpts_emitted": False,
         },
         "implemented_scope": [
@@ -1652,6 +1821,8 @@ def success_payload(
             "parse sanitized logs.jsonl rows",
             "parse sanitized metrics.csv rows",
             "write M-014 record-summary.json without raw excerpts",
+            "assign accepted in-window rows to UTC 60-second buckets",
+            "write bucket-summary.json without raw excerpts",
         ],
         "deferred_scope": [
             "metric calculation",
@@ -1705,7 +1876,7 @@ def run(bundle_arg: str, output_arg: str) -> int:
     assert sanitization_summary is not None
     assert sanitized_files is not None
 
-    record_summary, issue = parse_telemetry_records(
+    record_summary, bucket_summary, issue = parse_telemetry_records(
         sanitized_files=sanitized_files,
         preflight_summary=preflight_summary,
     )
@@ -1713,8 +1884,13 @@ def run(bundle_arg: str, output_arg: str) -> int:
         write_stderr_json(issue)
         return int(issue["exit_code"])
     assert record_summary is not None
+    assert bucket_summary is not None
 
     issue = write_record_summary(output_path=output_path, payload=record_summary)
+    if issue is not None:
+        write_stderr_json(issue)
+        return int(issue["exit_code"])
+    issue = write_bucket_summary(output_path=output_path, payload=bucket_summary)
     if issue is not None:
         write_stderr_json(issue)
         return int(issue["exit_code"])
@@ -1724,6 +1900,7 @@ def run(bundle_arg: str, output_arg: str) -> int:
         preflight_summary=preflight_summary,
         sanitization_summary=sanitization_summary,
         record_summary=record_summary,
+        bucket_summary=bucket_summary,
     )
     issue = write_summary(output_path=output_path, payload=payload)
     if issue is not None:
