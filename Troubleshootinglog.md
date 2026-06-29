@@ -81,6 +81,10 @@
 - P4-02 이후 검증 환경을 고정할 때 `PyYAML` 설치 또는 검증 스크립트 실행용 별도 환경을 결정합니다.
 - 공식 검증기 결과가 필요한 단계에서는 의존성 실패를 성공으로 간주하지 않습니다.
 
+**후속 메모**
+
+- 2026-06-30 / W-039: `python -m pip install --user PyYAML`로 PyYAML 6.0.3을 로컬 사용자 환경에 설치했습니다. 이후 `python tools/preflight_check.py --quiet` 결과가 `ok=5`, `warn=0`, `error=0`으로 바뀌어 T-001 경고는 해소됐습니다. PyYAML은 OpenBell Guard 실행 의존성이 아니라 공식 검증기 실행을 위한 로컬 개발·검증 환경 의존성으로 취급합니다.
+
 ### T-002 · 한글 문구 검증 중 PowerShell·Python 인코딩 경로 차이 발생
 
 **발생 단계**
@@ -111,6 +115,7 @@
 **후속 메모**
 
 - 2026-06-30 / W-036: 문서 검증 중 inline Python 코드에 직접 넣은 한글 문자열 검사에서 같은 유형의 매칭 실패가 재발했습니다. 파일 문제는 아니었고, 코드포인트 방식으로 재검증해 통과했습니다. 이후 자동 검증 명령에는 한글 리터럴 직접 삽입을 피합니다.
+- 2026-06-30 / W-039: 공식 Skill quick validator가 Windows 기본 인코딩 cp949로 UTF-8 `SKILL.md`를 읽으려다 실패했습니다. `python -X utf8 ...quick_validate.py .\src\skills\openbell-guard`로 실행하자 `Skill is valid!`가 출력됐습니다. 이후 Windows에서 공식 Skill 검증기를 실행할 때는 `-X utf8`을 기본으로 사용합니다.
 
 ### T-003 · Notion 업데이트 후 즉시 검색 검증 제한
 
@@ -169,3 +174,33 @@
 **후속 메모**
 
 - 2026-06-30 / W-037: 사용자가 새 GitHub 저장소를 제공했고 push를 요청했습니다. 기존 빈 `.git` 디렉터리에 `git init -b main`을 실행해 정상 저장소로 초기화하고 원격 `origin`을 연결했습니다. 이후 preflight에서 Git 유효성 경고는 해소되어야 합니다.
+
+### T-005 · 공식 플러그인 검증기가 `author`와 `interface` 필수 누락을 발견
+
+**발생 단계**
+
+- Phase/P4 단계: Phase 4 / PyYAML 설치 후 공식 검증기 재실행
+- 관련 W-ID: W-039
+
+**증상**
+
+- PyYAML 설치 후 `validate_plugin.py .\src`가 실행 단계까지 진입했지만, `plugin.json field author must be an object`, `plugin.json field interface must be an object` 오류로 실패했습니다.
+- 기존 P4-01 manifest는 실제 존재 구성요소만 선언한다는 최소 원칙에는 맞았지만, 현재 공식 검증기의 필수 표시 메타데이터 기준에는 부족했습니다.
+
+**확인한 원인**
+
+- 공식 검증기 스크립트가 `author` 객체와 `interface` 객체를 필수로 요구합니다.
+- 로컬 `docs/guides/plugin-build-guide.md`의 초기 manifest 예시가 이 최신 검증 기준을 충분히 반영하지 못했습니다.
+
+**조치**
+
+- `src/.codex-plugin/plugin.json`에 `author.name`과 `interface` 표시 메타데이터를 추가했습니다.
+- 존재하지 않는 MCP·앱·훅은 여전히 선언하지 않았습니다.
+- `tools/preflight_check.py`에도 `author`와 `interface` 필수 검사를 추가했습니다.
+- `docs/guides/plugin-build-guide.md`의 manifest 예시와 검증 명령을 실제 검증기 기준에 맞게 갱신했습니다.
+
+**재발 방지·후속 조치**
+
+- manifest 변경 후에는 `python C:\Users\gorhk\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src`를 실행합니다.
+- Windows에서 Skill 검증은 `python -X utf8 C:\Users\gorhk\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard`로 실행합니다.
+- `tools/preflight_check.py`가 공식 검증 전 기본 manifest 필수 필드를 사전 점검합니다.

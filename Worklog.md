@@ -1358,3 +1358,56 @@
 - 다음 단계는 P4-03 최소 입력·출력 구조와 Golden 씨앗 작성입니다.
 - Notion 동기화 완료: Phase 4에 W-038 요약 추가 요청이 성공했습니다. 다만 현재 노출된 Notion 도구에는 본문 fetch가 없고 검색 인덱스가 새 문구를 즉시 하이라이트하지 않아, 재검색 기반 본문 검증은 제한적으로만 확인됐습니다.
 - Git 동기화 완료: P4-02 산출물과 W-038 기록을 원격 `origin/main`에 push했습니다.
+
+### W-039 · T-001 PyYAML 설치와 공식 검증기 통과 기준 보강
+
+**요청**
+
+- T-001 해결을 위해 PyYAML을 로컬에 설치하는 것이 좋은지 판단하고, 좋다면 설치를 진행합니다.
+
+**수행 작업**
+
+- 현재 PyYAML이 설치돼 있지 않고 preflight가 T-001 경고를 출력함을 확인했습니다.
+- `python -m pip install --user PyYAML`로 PyYAML 6.0.3을 로컬 사용자 환경에 설치했습니다.
+- 설치 후 `python tools/preflight_check.py --quiet`를 재실행해 T-001 경고가 사라졌음을 확인했습니다.
+- 공식 플러그인 검증기를 재실행하자 `plugin.json`의 `author`와 `interface` 필수 필드 누락이 새로 드러났습니다.
+- `src/.codex-plugin/plugin.json`에 `author`와 `interface` 표시 메타데이터를 추가했습니다. 존재하지 않는 MCP·앱·훅은 선언하지 않았습니다.
+- `tools/preflight_check.py`에 `author`와 `interface` 필수 필드 사전 검사를 추가했습니다.
+- `docs/guides/plugin-build-guide.md`의 manifest 예시와 공식 검증 명령을 실제 검증기 기준에 맞게 갱신했습니다.
+- 공식 Skill 검증기는 Windows 기본 인코딩 문제를 피하기 위해 `python -X utf8`로 실행했습니다.
+- T-001 후속 메모, T-002 후속 메모와 신규 T-005를 `Troubleshootinglog.md`에 기록했습니다.
+- D-025로 PyYAML을 로컬 검증 의존성으로 설치하고 공식 manifest 기준을 반영한 결정을 기록했습니다.
+
+**변경 파일**
+
+- 수정: `src/.codex-plugin/plugin.json`
+- 수정: `tools/preflight_check.py`
+- 수정: `docs/guides/plugin-build-guide.md`
+- 수정: `Troubleshootinglog.md`
+- 수정: `Decisionlog.md`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `python -m pip show PyYAML`로 PyYAML 6.0.3이 `C:\Users\gorhk\AppData\Roaming\Python\Python312\site-packages`에 설치됐음을 확인했습니다.
+- `python tools/preflight_check.py --quiet` 결과 `ok=5`, `warn=0`, `error=0`을 확인했습니다.
+- `python C:\Users\gorhk\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src`가 통과했습니다.
+- `python -X utf8 C:\Users\gorhk\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard`가 `Skill is valid!`로 통과했습니다.
+- `python -m unittest .\src\tests\test_contract_reference.py -v`로 P4-02 계약 SHA 테스트 3개가 모두 통과했습니다.
+- 이번 요청에서는 PyYAML을 프로젝트 런타임 의존성 파일로 추가하지 않았고, 로컬 개발·검증 환경 의존성으로만 설치했습니다.
+- `logs/` 파일은 수동 편집하지 않았습니다.
+
+**트러블슈팅**
+
+- T-001: PyYAML 6.0.3 설치로 해소됐습니다.
+- T-002: 공식 Skill 검증기를 Windows에서 실행할 때 `python -X utf8`이 필요함을 후속 메모로 기록했습니다.
+- T-005: PyYAML 설치 후 공식 플러그인 검증기가 `author`와 `interface` 누락을 발견한 문제를 새로 기록하고 해결했습니다.
+
+**결과**
+
+- T-001은 해결됐고, 현재 preflight·공식 플러그인 검증기·공식 Skill 검증기·P4-02 계약 테스트가 모두 통과합니다.
+- 현재 단계는 Phase 4 운영·검증 환경 보강이며, P4-02 완료 후 P4-03 시작 전 위치입니다.
+- 남은 태스크는 P4-03~P4-19 약 17단계이며, 예상 작업량은 높음입니다.
+- 다음 단계는 P4-03 최소 입력·출력 구조와 Golden 씨앗 작성입니다.
+- Notion 동기화 완료: Phase 4에 W-039 요약 추가 요청이 성공했고, D-025 하위 결정 페이지를 생성했습니다. Notion 검색으로 D-025 페이지와 Phase 4의 D-025 링크 노출을 확인했습니다.
+- Git 동기화 상태: 대기 — Notion 반영 후 커밋하고 원격 `origin/main`에 push합니다.

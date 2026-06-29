@@ -137,6 +137,23 @@ def check_plugin_scaffold(root: Path) -> list[Result]:
     if unsupported:
         results.append(Result("ERROR", "PLUGIN_UNSUPPORTED", f"declares unsupported/nonexistent components: {unsupported}"))
 
+    author = manifest.get("author")
+    if not isinstance(author, dict) or not str(author.get("name", "")).strip():
+        results.append(Result("ERROR", "PLUGIN_AUTHOR", "plugin.json author.name is required"))
+
+    interface = manifest.get("interface")
+    if not isinstance(interface, dict):
+        results.append(Result("ERROR", "PLUGIN_INTERFACE", "plugin.json interface object is required"))
+    else:
+        for key in ["displayName", "shortDescription", "longDescription", "developerName", "category"]:
+            if not str(interface.get(key, "")).strip():
+                results.append(Result("ERROR", "PLUGIN_INTERFACE", f"plugin.json interface.{key} is required"))
+        capabilities = interface.get("capabilities")
+        if not isinstance(capabilities, list) or not all(isinstance(item, str) and item.strip() for item in capabilities):
+            results.append(Result("ERROR", "PLUGIN_INTERFACE", "plugin.json interface.capabilities must be a non-empty string array"))
+        if not str(interface.get("defaultPrompt") or interface.get("default_prompt") or "").strip():
+            results.append(Result("ERROR", "PLUGIN_INTERFACE", "plugin.json interface.defaultPrompt is required"))
+
     if skill_path.exists():
         skill = skill_path.read_text(encoding="utf-8")
         if "name: openbell-guard" not in skill:

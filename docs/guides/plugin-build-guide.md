@@ -73,7 +73,23 @@ submission.zip
   "name": "openbell-guard",
   "version": "0.1.0",
   "description": "Analyze brokerage telemetry for market-open and external-dependency incidents with evidence-backed reports.",
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "author": {
+    "name": "gorhkdwj"
+  },
+  "interface": {
+    "displayName": "OpenBell Guard",
+    "shortDescription": "Analyze read-only brokerage incident bundles with metric-contract checks.",
+    "longDescription": "OpenBell Guard helps Codex analyze synthetic or anonymized post-incident brokerage telemetry bundles for market-open and external-dependency degradation. It is read-only and produces evidence-backed analysis outputs.",
+    "developerName": "gorhkdwj",
+    "category": "Data Analysis",
+    "capabilities": [
+      "Validate the OpenBell Guard metric contract",
+      "Analyze synthetic or anonymized incident bundles",
+      "Draft evidence-backed incident report summaries"
+    ],
+    "defaultPrompt": "Use OpenBell Guard to analyze a synthetic or anonymized brokerage incident bundle. Do not read or expose raw secrets, customer data, or account data. Rely on validated outputs and separate confirmed facts, hypotheses, and unknowns."
+  }
 }
 ```
 
@@ -81,6 +97,7 @@ submission.zip
 
 - `name`은 안정적인 소문자 kebab-case `openbell-guard`를 사용합니다. 제출 루트 `src/`의 이름과 같을 필요는 없습니다.
 - 경로는 플러그인 루트 기준 상대경로이며 `./`로 시작합니다.
+- 현재 공식 검증기는 `author` 객체와 `interface` 객체를 요구합니다. `interface`에는 사용자에게 보이는 이름, 설명, 개발자명, 카테고리, capability와 기본 호출 프롬프트를 둡니다.
 - `.mcp.json`, 앱 또는 hooks가 없으면 관련 필드를 선언하지 않습니다.
 - 임시 문구나 존재하지 않는 홈페이지·개인정보처리방침 링크를 넣지 않습니다.
 - 공식 검증기가 허용하지 않는 선택 필드는 제거합니다.
@@ -173,6 +190,15 @@ description: Analyze a synthetic or anonymized post-incident brokerage bundle fo
 - [ ] manifest가 선언한 모든 경로가 존재합니다.
 - [ ] `SKILL.md`의 메타데이터와 설명이 유효합니다.
 - [ ] 공식 플러그인 및 Skill 검증기가 통과합니다.
+
+현재 로컬 검증 기준 명령은 다음과 같습니다.
+
+```powershell
+python C:\Users\gorhk\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src
+python -X utf8 C:\Users\gorhk\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard
+```
+
+첫 번째 명령은 `PyYAML`이 필요합니다. 로컬 개발 환경에 없으면 `python -m pip install --user PyYAML`로 설치합니다. 두 번째 명령은 Windows 기본 인코딩이 cp949일 때 한글이 포함된 `SKILL.md` 읽기에 실패할 수 있어 `-X utf8`을 붙입니다.
 
 ### 기능
 

@@ -2,5 +2,21 @@
   "name": "openbell-guard",
   "version": "0.1.0",
   "description": "Analyze brokerage telemetry for market-open and external-dependency incidents with evidence-backed reports.",
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "author": {
+    "name": "gorhkdwj"
+  },
+  "interface": {
+    "displayName": "OpenBell Guard",
+    "shortDescription": "Analyze read-only brokerage incident bundles with metric-contract checks.",
+    "longDescription": "OpenBell Guard helps Codex analyze synthetic or anonymized post-incident brokerage telemetry bundles for market-open and external-dependency degradation. It is read-only and produces evidence-backed analysis outputs.",
+    "developerName": "gorhkdwj",
+    "category": "Data Analysis",
+    "capabilities": [
+      "Validate the OpenBell Guard metric contract",
+      "Analyze synthetic or anonymized incident bundles",
+      "Draft evidence-backed incident report summaries"
+    ],
+    "defaultPrompt": "Use OpenBell Guard to analyze a synthetic or anonymized brokerage incident bundle. Do not read or expose raw secrets, customer data, or account data. Rely on validated outputs and separate confirmed facts, hypotheses, and unknowns."
+  }
 }
