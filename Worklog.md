@@ -1313,4 +1313,48 @@
 - 남은 태스크는 P4-02~P4-19 약 18단계이며, 예상 작업량은 높음입니다.
 - 다음 구현 단계는 P4-02 계약 복사본 생성과 원본·복사본 SHA-256 일치 검증입니다.
 - Notion 동기화 완료: Phase 4에 W-037 요약 추가 요청이 성공했고, D-024 하위 결정 페이지를 생성했습니다. Notion 검색으로 D-024 페이지와 Phase 4의 D-024 링크 노출을 확인했습니다.
-- Git 동기화 상태: 이 W-037 항목을 포함한 변경사항을 커밋하고 원격 `origin/main`에 push합니다.
+- Git 동기화 완료: W-037 항목을 포함한 첫 커밋 `b6adece1e133fb46e6383d8854c2cf15cb112052`를 원격 `origin/main`에 push했습니다.
+
+### W-038 · Phase 4 P4-02 계약 복사본·SHA 검증
+
+**요청**
+
+- 다음 작업을 이어서 진행합니다. 현재 순서상 P4-02 계약 복사본 생성과 원본·복사본 SHA-256 일치 검증을 수행합니다.
+
+**수행 작업**
+
+- `python tools/preflight_check.py --quiet`로 시작 전 사전 점검을 실행했습니다.
+- `docs/phase4-implementation-sequence.md`와 `docs/openbell-guard-metrics-validation-contract.md`에서 P4-02 기준과 제출용 계약 복사본 경로를 확인했습니다.
+- 원본 계약 `docs/openbell-guard-metrics-validation-contract.md`를 `src/skills/openbell-guard/references/metrics-validation-contract.md`로 그대로 복사했습니다.
+- 표준 라이브러리 `unittest` 기반 `src/tests/test_contract_reference.py`를 추가해 계약 파일 존재, SHA-256 일치, `contract_version`과 `1.0.0` 존재를 검증하도록 했습니다.
+- 이번 단계에서는 분석기, fixture, CLI, README, 제출 ZIP을 만들지 않았습니다.
+
+**변경 파일**
+
+- 신규: `src/skills/openbell-guard/references/metrics-validation-contract.md`
+- 신규: `src/tests/test_contract_reference.py`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `python -m unittest .\src\tests\test_contract_reference.py -v`를 실행해 3개 테스트가 모두 통과했습니다.
+- `python -m py_compile .\src\tests\test_contract_reference.py`로 테스트 파일 문법 검사를 통과했습니다.
+- 원본 계약과 제출용 복사본의 SHA-256이 모두 `64551154261053147424c72d1156ebaaff9d6b2b73ca6531bfa28cf318650f6b`임을 확인했습니다.
+- `python tools/preflight_check.py --quiet` 결과 `ok=4`, `warn=1`, `error=0`을 확인했습니다. 남은 경고는 기존 T-001 `PyYAML` 미설치입니다.
+- `git status --short --ignored`로 새 계약 복사본과 테스트만 추적 대상이며 `logs/`, 로컬 AI·IDE 상태와 Python 캐시는 제외됨을 확인했습니다.
+- `logs/` 파일은 수동 편집하지 않았습니다.
+
+**트러블슈팅**
+
+- 새 T-ID 없음.
+- 기존 T-001 경고는 계속 남아 있습니다. 공식 플러그인·Skill 검증기를 실행해야 하는 단계에서 해결하거나 미검증 범위로 명시해야 합니다.
+
+**결과**
+
+- P4-02가 완료됐습니다. 개발용 원본 계약과 제출용 계약 복사본이 같은 SHA-256으로 고정됐습니다.
+- 새로운 중요한 범위·아키텍처 결정은 없어 Decisionlog 새 항목은 만들지 않았습니다.
+- 현재 단계는 Phase 4의 P4-02/19이며, P4-01 스캐폴드 다음의 계약 동기화 검증 단계입니다.
+- 남은 태스크는 P4-03~P4-19 약 17단계이며, 예상 작업량은 높음입니다.
+- 다음 단계는 P4-03 최소 입력·출력 구조와 Golden 씨앗 작성입니다.
+- Notion 동기화 완료: Phase 4에 W-038 요약 추가 요청이 성공했습니다. 다만 현재 노출된 Notion 도구에는 본문 fetch가 없고 검색 인덱스가 새 문구를 즉시 하이라이트하지 않아, 재검색 기반 본문 검증은 제한적으로만 확인됐습니다.
+- Git 동기화 상태: 대기 — Notion 반영 후 커밋하고 원격 `origin/main`에 push합니다.
