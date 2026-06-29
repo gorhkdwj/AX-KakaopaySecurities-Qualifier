@@ -1465,3 +1465,61 @@
 - 다음 단계는 P4-04 최소 CLI 골격과 입출력 경로 검증입니다.
 - Notion 동기화 완료: Phase 4에 W-040 요약 추가 요청이 성공했고, fetch로 Phase 4 본문에 W-040 항목이 포함된 것을 확인했습니다. 단, Notion enhanced markdown spec URL 조회는 현재 도구에서 유효 URL로 처리되지 않아 실패했으며, 이번 업데이트는 단순 heading/list만 사용했습니다.
 - Git 동기화 완료: P4-03 산출물과 1차 W-040 기록을 커밋 `846ed536515707f89145bbcfef8a114ef48407e8`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영했습니다.
+
+### W-041 · Phase 4 P4-04 최소 CLI 골격과 입출력 경로 검증
+
+**요청**
+
+- 다음 구현 작업을 이어서 진행합니다. 현재 순서상 P4-04 최소 CLI 골격과 입출력 경로 검증을 수행합니다.
+
+**수행 작업**
+
+- `plugin-creator` Skill을 참고해 기존 플러그인 구조와 공식 검증 흐름을 유지했습니다.
+- `engineering:testing-strategy` Skill을 참고해 이번 단계를 CLI 경로와 종료 코드 테스트로 한정했습니다.
+- `src/skills/openbell-guard/scripts/run_openbell.py`를 추가했습니다.
+- CLI 인자는 `--bundle`, `--output`으로 고정했습니다.
+- 정상 실행 시 출력 폴더를 만들고 P4-04 전용 `openbell-cli-summary.json`을 생성하도록 했습니다.
+- 최종 산출물인 `analysis.json`과 `sanitization-report.md`는 아직 생성하지 않도록 명시했습니다.
+- 번들 경로 없음·번들이 파일인 경우는 exit 2로 처리하도록 했습니다.
+- 출력 경로가 파일이거나 입력 번들 내부·동일 경로인 경우는 exit 5로 처리하도록 했습니다.
+- exit 0/2/3/4/5 이름별 상수 골격을 추가해 이후 보안 차단과 한도 초과 단계가 같은 종료 코드 기준을 사용하게 했습니다.
+- `src/tests/test_run_openbell_cli.py`를 추가해 성공, 없는 bundle, 파일 output, bundle 내부 output, 종료 코드 골격을 검증했습니다.
+- `src/skills/openbell-guard/SKILL.md`를 P4-04 현재 상태와 실행 예시에 맞게 갱신했습니다.
+- smoke 실행 결과 폴더가 Git 추적 대상으로 보이지 않도록 `.gitignore`에 `out/`을 추가했습니다.
+- 이번 단계에서는 bundle 내부 파일 검사, 민감정보 마스킹, 로그·메트릭 파싱, 지표 계산, 최종 보고서 생성을 구현하지 않았습니다.
+
+**변경 파일**
+
+- 신규: `src/skills/openbell-guard/scripts/run_openbell.py`
+- 신규: `src/tests/test_run_openbell_cli.py`
+- 수정: `src/skills/openbell-guard/SKILL.md`
+- 수정: `.gitignore`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `python -m unittest .\src\tests\test_run_openbell_cli.py -v`를 실행해 CLI 테스트 5개가 모두 통과했습니다.
+- `python .\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\src\tests\fixtures\domestic-market-open-min\bundle --output .\out\p4-04-smoke`를 실행해 exit 0과 `openbell-cli-summary.json` 생성을 확인했습니다.
+- `python -m unittest discover -s .\src\tests -v`를 실행해 전체 테스트 17개가 모두 통과했습니다.
+- `python .\tools\preflight_check.py --quiet` 결과 `ok=5`, `warn=0`, `error=0`을 확인했습니다.
+- `python C:\Users\gorhk\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src`가 통과했습니다.
+- `python -X utf8 C:\Users\gorhk\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard`가 `Skill is valid!`로 통과했습니다.
+- `python -m py_compile .\src\skills\openbell-guard\scripts\run_openbell.py .\src\tests\test_contract_reference.py .\src\tests\test_domestic_market_open_min_fixture.py .\src\tests\test_run_openbell_cli.py .\tools\preflight_check.py`가 통과했습니다.
+- `rg -n -i "sk-[A-Za-z0-9]|password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|secret[_-]?key|계좌|account_number" .\src\skills\openbell-guard\scripts .\src\tests\test_run_openbell_cli.py` 결과 의심 항목이 없었습니다.
+- `git status --short --ignored`로 변경 대상과 ignored 대상(`logs/`, `out/`, Python 캐시)을 확인했습니다.
+- `logs/` 파일은 수동 편집하지 않았습니다.
+
+**트러블슈팅**
+
+- 새 T-ID 없음.
+- smoke 실행으로 `out/` 폴더가 생겼으나 검증 산출물은 Git 추적 대상이 아니어야 하므로 `.gitignore`에 `out/`을 추가했습니다.
+
+**결과**
+
+- P4-04가 완료됐습니다. 이후 P4-05~P4-15가 같은 `run_openbell.py` 진입점에 입력 검사, 마스킹, 파싱, 지표 계산과 출력 검증을 순차적으로 붙일 수 있게 됐습니다.
+- 새로운 중요한 범위·아키텍처 결정은 없어 Decisionlog 새 항목은 만들지 않았습니다.
+- 현재 단계는 Phase 4의 P4-04/19이며, P4-03 Golden 기준선 다음의 실행 진입점 고정 단계입니다.
+- 남은 태스크는 P4-05~P4-19 약 15단계이며, 예상 작업량은 높음입니다.
+- 다음 단계는 P4-05 번들 사전 검사입니다.
+- Notion 동기화 완료: Phase 4에 W-041 요약 추가 요청이 성공했고, fetch로 Phase 4 본문에 W-041 항목이 포함된 것을 확인했습니다.
+- Git 동기화 대기: W-041 산출물과 기록을 커밋·push해야 합니다.
