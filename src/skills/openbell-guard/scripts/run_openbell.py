@@ -1,10 +1,10 @@
 """OpenBell Guard command-line entry point.
 
-P4-14 implements the shared CLI, bundle preflight gate, sanitizer,
+P4-15 implements the shared CLI, bundle preflight gate, sanitizer,
 line-oriented telemetry parser, 60-second bucket preparation, basic bucket
 metrics, observability lag metrics, baseline-vs-incident comparisons, and
 threshold-based state judgment with context metrics, evidence-backed claims,
-and the final machine-verifiable ``analysis.json``:
+the final machine-verifiable ``analysis.json``, and an output validator:
 
 - parse ``--bundle`` and ``--output``;
 - verify that the bundle is an existing, non-symlink directory;
@@ -30,6 +30,8 @@ and the final machine-verifiable ``analysis.json``:
 - create evidence and claim summaries without raw excerpts.
 - write ``analysis.json`` by merging metric, state, and evidence summaries
   without raw excerpts.
+- validate ``analysis.json`` structure, evidence references, claim evidence,
+  claim markers, and sensitive residue before reporting success.
 
 It still does not create the human-readable Markdown report. That behavior
 belongs to later Phase 4 steps and must keep using this entry point.
@@ -60,9 +62,10 @@ EXIT_CODES = {
     "output_validation_error": 5,
 }
 
-CLI_STAGE = "P4-14"
+CLI_STAGE = "P4-15"
 SUMMARY_FILENAME = "openbell-cli-summary.json"
 ANALYSIS_FILENAME = "analysis.json"
+OUTPUT_VALIDATION_FILENAME = "output-validation.json"
 SANITIZED_BUNDLE_DIR = "sanitized-bundle"
 SANITIZATION_REPORT = "sanitization-report.md"
 RECORD_SUMMARY_FILENAME = "record-summary.json"
@@ -126,6 +129,15 @@ LOG_RECORD_LIMIT = 100_000
 METRIC_RECORD_LIMIT = 50_000
 JSONL_RECORD_BYTE_LIMIT = 1 * MIB
 INCIDENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+EVIDENCE_ID_PATTERN = re.compile(r"^E-\d{3}$")
+CLAIM_ID_PATTERN = re.compile(r"^C-\d{3}$")
+WINDOW_TYPE_VALUES = frozenset({"baseline", "incident"})
+BUCKET_STATE_VALUES = frozenset({"healthy", "breach", "unknown"})
+RUN_STATUS_VALUES = frozenset({"complete", "degraded", "fatal"})
+CLAIM_TYPE_VALUES = frozenset({"confirmed_fact", "hypothesis", "unknown"})
+CLAIM_CONFIDENCE_VALUES = frozenset({"high", "medium", "low", "unknown"})
+EVIDENCE_SOURCE_TYPES = frozenset({"incident", "log", "metric", "service_map"})
+BREACH_REASON_KEYS = frozenset({"metric", "value", "threshold", "operator"})
 LOG_REQUIRED_FIELDS = frozenset({"event_time", "service_name", "service_path", "status"})
 LOG_OPTIONAL_FIELDS = frozenset(
     {
@@ -231,11 +243,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="run_openbell.py",
         description=(
-            "Prepare an OpenBell Guard run directory. P4-14 validates the CLI, "
+            "Prepare an OpenBell Guard run directory. P4-15 validates the CLI, "
             "paths, bundle file contract, byte limits, incident metadata, and "
             "creates a masked working copy, telemetry record summary, bucket summary, "
             "metric summary, threshold-based state summary, evidence summary, and "
-            "analysis.json."
+            "validated analysis.json."
         ),
     )
     parser.add_argument(
@@ -3137,6 +3149,417 @@ def write_analysis_summary(*, output_path: Path, payload: dict[str, Any]) -> dic
     return None
 
 
+def output_validation_issue(
+    *,
+    issue_code: str,
+    message: str,
+    source_file: str | None = None,
+    source_location: str | None = None,
+) -> dict[str, Any]:
+    issue: dict[str, Any] = {
+        "issue_code": issue_code,
+        "severity": "fatal",
+        "message": message,
+    }
+    if source_file is not None:
+        issue["source_file"] = source_file
+    if source_location is not None:
+        issue["source_location"] = source_location
+    return issue
+
+
+def is_json_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
+
+
+def is_relative_output_reference(value: Any) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    if Path(value).is_absolute():
+        return False
+    if re.match(r"^[A-Za-z]:[\\/]", value):
+        return False
+    return True
+
+
+def add_schema_issue(issues: list[dict[str, Any]], message: str, source_location: str) -> None:
+    issues.append(
+        output_validation_issue(
+            issue_code="OUT001_SCHEMA",
+            message=message,
+            source_file=ANALYSIS_FILENAME,
+            source_location=source_location,
+        )
+    )
+
+
+def validate_top_level_analysis_schema(analysis: Any, issues: list[dict[str, Any]]) -> None:
+    if not isinstance(analysis, dict):
+        add_schema_issue(issues, "analysis.json must contain a top-level object.", "$")
+        return
+
+    required_types: dict[str, type | tuple[type, ...]] = {
+        "schema_version": str,
+        "stage": str,
+        "contract_version": str,
+        "contract_sha256": str,
+        "fixture_id": str,
+        "run": dict,
+        "incident": dict,
+        "source_summary": dict,
+        "record_counts": dict,
+        "service_paths": list,
+        "bucket_metrics": list,
+        "comparison_metrics": list,
+        "context_metrics": list,
+        "evidence": list,
+        "claims": list,
+    }
+    for field, expected_type in required_types.items():
+        if not isinstance(analysis.get(field), expected_type):
+            add_schema_issue(issues, f"analysis.json field {field} has an invalid type.", f"$.{field}")
+
+    if analysis.get("schema_version") != SCHEMA_VERSION:
+        add_schema_issue(issues, "analysis.json schema_version is not supported.", "$.schema_version")
+    if analysis.get("stage") != CLI_STAGE:
+        add_schema_issue(issues, "analysis.json stage does not match the current CLI stage.", "$.stage")
+    if analysis.get("contract_version") != CONTRACT_VERSION:
+        add_schema_issue(issues, "analysis.json contract_version is not supported.", "$.contract_version")
+
+    contract_sha256, issue = contract_reference_sha256()
+    if issue is None and analysis.get("contract_sha256") != contract_sha256:
+        add_schema_issue(issues, "analysis.json contract_sha256 does not match the bundled contract.", "$.contract_sha256")
+
+    if analysis.get("raw_excerpts_emitted") is not False:
+        add_schema_issue(issues, "analysis.json must set raw_excerpts_emitted to false.", "$.raw_excerpts_emitted")
+
+    run = analysis.get("run")
+    if isinstance(run, dict):
+        if run.get("status") not in RUN_STATUS_VALUES:
+            add_schema_issue(issues, "analysis.json run.status is not valid.", "$.run.status")
+        if not isinstance(run.get("exit_code"), int) or isinstance(run.get("exit_code"), bool):
+            add_schema_issue(issues, "analysis.json run.exit_code must be an integer.", "$.run.exit_code")
+        if not isinstance(run.get("issues"), list):
+            add_schema_issue(issues, "analysis.json run.issues must be a list.", "$.run.issues")
+        if not isinstance(run.get("limitations"), list):
+            add_schema_issue(issues, "analysis.json run.limitations must be a list.", "$.run.limitations")
+
+    source_summary = analysis.get("source_summary")
+    if isinstance(source_summary, dict):
+        primary = source_summary.get("primary_telemetry")
+        if primary is not None and primary not in ALLOWED_BUNDLE_FILES:
+            add_schema_issue(issues, "source_summary.primary_telemetry is not an allowed bundle file.", "$.source_summary.primary_telemetry")
+        context_files = source_summary.get("context_files")
+        if not isinstance(context_files, list) or not all(file_name in ALLOWED_BUNDLE_FILES for file_name in context_files):
+            add_schema_issue(issues, "source_summary.context_files must contain allowed relative bundle file names.", "$.source_summary.context_files")
+        contract_reference = source_summary.get("metric_contract_reference")
+        if contract_reference != CONTRACT_REFERENCE_RELATIVE_PATH:
+            add_schema_issue(issues, "source_summary.metric_contract_reference does not match the bundled contract path.", "$.source_summary.metric_contract_reference")
+
+
+def validate_analysis_bucket_metrics(analysis: dict[str, Any], issues: list[dict[str, Any]]) -> None:
+    bucket_metrics = analysis.get("bucket_metrics")
+    if not isinstance(bucket_metrics, list):
+        return
+
+    for index, bucket in enumerate(bucket_metrics):
+        location = f"$.bucket_metrics[{index}]"
+        if not isinstance(bucket, dict):
+            add_schema_issue(issues, "Each bucket_metrics item must be an object.", location)
+            continue
+        if bucket.get("window_type") not in WINDOW_TYPE_VALUES:
+            add_schema_issue(issues, "bucket_metrics window_type is not valid.", f"{location}.window_type")
+        if bucket.get("bucket_state") not in BUCKET_STATE_VALUES:
+            add_schema_issue(issues, "bucket_metrics bucket_state is not valid.", f"{location}.bucket_state")
+        if not isinstance(bucket.get("service_path"), str) or bucket.get("service_path") not in STANDARD_SERVICE_PATHS:
+            add_schema_issue(issues, "bucket_metrics service_path is not valid.", f"{location}.service_path")
+        if not isinstance(bucket.get("metrics"), dict):
+            add_schema_issue(issues, "bucket_metrics metrics must be an object.", f"{location}.metrics")
+
+        breach_reasons = bucket.get("breach_reasons")
+        if breach_reasons is None:
+            continue
+        if not isinstance(breach_reasons, list):
+            add_schema_issue(issues, "bucket_metrics breach_reasons must be a list.", f"{location}.breach_reasons")
+            continue
+        for reason_index, reason in enumerate(breach_reasons):
+            reason_location = f"{location}.breach_reasons[{reason_index}]"
+            if not isinstance(reason, dict):
+                add_schema_issue(issues, "Each breach reason must be an object.", reason_location)
+                continue
+            if set(reason) != BREACH_REASON_KEYS:
+                add_schema_issue(
+                    issues,
+                    "Breach reasons must expose only metric, value, threshold, and operator.",
+                    reason_location,
+                )
+            if not isinstance(reason.get("metric"), str):
+                add_schema_issue(issues, "Breach reason metric must be a string.", f"{reason_location}.metric")
+            if not is_json_number(reason.get("value")):
+                add_schema_issue(issues, "Breach reason value must be numeric.", f"{reason_location}.value")
+            if not is_json_number(reason.get("threshold")):
+                add_schema_issue(issues, "Breach reason threshold must be numeric.", f"{reason_location}.threshold")
+            if reason.get("operator") != ">":
+                add_schema_issue(issues, "Breach reason operator must be >.", f"{reason_location}.operator")
+
+
+def validate_analysis_evidence_and_claims(analysis: dict[str, Any], issues: list[dict[str, Any]]) -> None:
+    evidence_items = analysis.get("evidence")
+    claim_items = analysis.get("claims")
+    if not isinstance(evidence_items, list) or not isinstance(claim_items, list):
+        return
+
+    evidence_ids: set[str] = set()
+    for index, evidence in enumerate(evidence_items):
+        location = f"$.evidence[{index}]"
+        if not isinstance(evidence, dict):
+            add_schema_issue(issues, "Each evidence item must be an object.", location)
+            continue
+        evidence_id = evidence.get("evidence_id")
+        if not isinstance(evidence_id, str) or EVIDENCE_ID_PATTERN.fullmatch(evidence_id) is None:
+            add_schema_issue(issues, "evidence_id must use the E-001 format.", f"{location}.evidence_id")
+        elif evidence_id in evidence_ids:
+            add_schema_issue(issues, "evidence_id values must be unique.", f"{location}.evidence_id")
+        else:
+            evidence_ids.add(evidence_id)
+
+        if evidence.get("source_type") not in EVIDENCE_SOURCE_TYPES:
+            add_schema_issue(issues, "evidence source_type is not valid.", f"{location}.source_type")
+        if not is_relative_output_reference(evidence.get("source_file")):
+            add_schema_issue(issues, "evidence source_file must be a relative file reference.", f"{location}.source_file")
+        if not isinstance(evidence.get("source_location"), str) or not evidence.get("source_location"):
+            add_schema_issue(issues, "evidence source_location must be a non-empty string.", f"{location}.source_location")
+        masked_excerpt = evidence.get("masked_excerpt")
+        if masked_excerpt is not None and (not isinstance(masked_excerpt, str) or len(masked_excerpt) > 300):
+            add_schema_issue(issues, "evidence masked_excerpt must be a string of at most 300 characters.", f"{location}.masked_excerpt")
+
+    claim_ids: set[str] = set()
+    for index, claim in enumerate(claim_items):
+        location = f"$.claims[{index}]"
+        if not isinstance(claim, dict):
+            add_schema_issue(issues, "Each claim item must be an object.", location)
+            continue
+        claim_id = claim.get("claim_id")
+        if not isinstance(claim_id, str) or CLAIM_ID_PATTERN.fullmatch(claim_id) is None:
+            add_schema_issue(issues, "claim_id must use the C-001 format.", f"{location}.claim_id")
+        elif claim_id in claim_ids:
+            add_schema_issue(issues, "claim_id values must be unique.", f"{location}.claim_id")
+        else:
+            claim_ids.add(claim_id)
+
+        if claim.get("report_claim_marker") != f"[{claim_id}]":
+            add_schema_issue(issues, "claim report_claim_marker must match the claim ID.", f"{location}.report_claim_marker")
+        if claim.get("claim_type") not in CLAIM_TYPE_VALUES:
+            add_schema_issue(issues, "claim_type is not valid.", f"{location}.claim_type")
+        if not isinstance(claim.get("statement"), str) or not claim.get("statement"):
+            add_schema_issue(issues, "claim statement must be a non-empty string.", f"{location}.statement")
+
+        claim_type = claim.get("claim_type")
+        if claim_type == "confirmed_fact":
+            evidence_refs = claim.get("evidence_refs")
+            if not isinstance(evidence_refs, list):
+                add_schema_issue(issues, "confirmed_fact evidence_refs must be a list.", f"{location}.evidence_refs")
+                continue
+            if not evidence_refs:
+                issues.append(
+                    output_validation_issue(
+                        issue_code="OUT003_FACT_WITHOUT_EVIDENCE",
+                        message="confirmed_fact claims must cite at least one evidence ID.",
+                        source_file=ANALYSIS_FILENAME,
+                        source_location=f"{location}.evidence_refs",
+                    )
+                )
+            for evidence_ref in evidence_refs:
+                if evidence_ref not in evidence_ids:
+                    issues.append(
+                        output_validation_issue(
+                            issue_code="OUT002_BROKEN_EVIDENCE_REF",
+                            message="A claim references an evidence ID that does not exist.",
+                            source_file=ANALYSIS_FILENAME,
+                            source_location=f"{location}.evidence_refs",
+                        )
+                    )
+        elif claim_type == "hypothesis":
+            supporting_refs = claim.get("supporting_evidence_refs")
+            contradicting_refs = claim.get("contradicting_evidence_refs", [])
+            if not isinstance(supporting_refs, list) or not supporting_refs:
+                add_schema_issue(issues, "hypothesis supporting_evidence_refs must be a non-empty list.", f"{location}.supporting_evidence_refs")
+            if not isinstance(contradicting_refs, list):
+                add_schema_issue(issues, "hypothesis contradicting_evidence_refs must be a list.", f"{location}.contradicting_evidence_refs")
+                contradicting_refs = []
+            if claim.get("confidence") not in CLAIM_CONFIDENCE_VALUES:
+                add_schema_issue(issues, "hypothesis confidence is not valid.", f"{location}.confidence")
+            if not isinstance(claim.get("missing_data"), list):
+                add_schema_issue(issues, "hypothesis missing_data must be a list.", f"{location}.missing_data")
+            for evidence_ref in list(supporting_refs or []) + list(contradicting_refs):
+                if evidence_ref not in evidence_ids:
+                    issues.append(
+                        output_validation_issue(
+                            issue_code="OUT002_BROKEN_EVIDENCE_REF",
+                            message="A hypothesis references an evidence ID that does not exist.",
+                            source_file=ANALYSIS_FILENAME,
+                            source_location=f"{location}.supporting_evidence_refs",
+                        )
+                    )
+        elif claim_type == "unknown":
+            if not isinstance(claim.get("missing_data"), list) or not claim.get("missing_data"):
+                add_schema_issue(issues, "unknown claims must include non-empty missing_data.", f"{location}.missing_data")
+
+
+def validate_output_secret_residue(*, output_path: Path, issues: list[dict[str, Any]]) -> list[str]:
+    checked_files: list[str] = []
+    for file_path in sorted(path for path in output_path.rglob("*") if path.is_file()):
+        relative_file = file_path.relative_to(output_path).as_posix()
+        checked_files.append(relative_file)
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            issues.append(
+                output_validation_issue(
+                    issue_code="OUT005_SECRET_RESIDUE",
+                    message="A generated output file is not UTF-8 text and could not be scanned for sensitive residue.",
+                    source_file=relative_file,
+                )
+            )
+            continue
+        except OSError:
+            issues.append(
+                output_validation_issue(
+                    issue_code="OUT005_SECRET_RESIDUE",
+                    message="A generated output file could not be read for sensitive residue scanning.",
+                    source_file=relative_file,
+                )
+            )
+            continue
+        for match in find_sensitive_matches(text, source_file=relative_file, include_redacted=False):
+            issues.append(
+                output_validation_issue(
+                    issue_code="OUT005_SECRET_RESIDUE",
+                    message=f"Sensitive residue pattern remained in generated output: {match['type']}.",
+                    source_file=relative_file,
+                    source_location=f"L{match['line']}",
+                )
+            )
+    return checked_files
+
+
+def output_validation_summary(*, issues: list[dict[str, Any]], checked_files: list[str]) -> dict[str, Any]:
+    issue_codes = {issue["issue_code"] for issue in issues}
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "stage": CLI_STAGE,
+        "status": "failed" if issues else "passed",
+        "exit_code": EXIT_CODES["output_validation_error"] if issues else EXIT_CODES["ok"],
+        "validator": "validate_bundle.py",
+        "checked_files": checked_files,
+        "checks": {
+            "analysis_schema": "failed" if "OUT001_SCHEMA" in issue_codes else "passed",
+            "evidence_references": "failed" if "OUT002_BROKEN_EVIDENCE_REF" in issue_codes else "passed",
+            "confirmed_fact_evidence": "failed" if "OUT003_FACT_WITHOUT_EVIDENCE" in issue_codes else "passed",
+            "report_claim_refs": "not_applicable_until_p4_16",
+            "secret_residue": "failed" if "OUT005_SECRET_RESIDUE" in issue_codes else "passed",
+        },
+        "issue_counts": {"fatal": len(issues)},
+        "issues": issues,
+        "raw_excerpts_emitted": False,
+    }
+
+
+def write_output_validation_summary(*, output_path: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        (output_path / OUTPUT_VALIDATION_FILENAME).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        return issue_payload(
+            exit_code=EXIT_CODES["output_validation_error"],
+            issue_code="CLI020_OUTPUT_VALIDATION_WRITE_FAILED",
+            message="The output validation summary file could not be written.",
+            argument="output",
+        )
+    return None
+
+
+def validate_output_directory(
+    *, output_path: Path, write_report: bool = True
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    issues: list[dict[str, Any]] = []
+    checked_files: list[str] = []
+
+    if not output_path.exists() or not output_path.is_dir():
+        issues.append(
+            output_validation_issue(
+                issue_code="OUT001_SCHEMA",
+                message="The output path must be an existing directory.",
+                source_file=str(output_path),
+            )
+        )
+        payload = output_validation_summary(issues=issues, checked_files=checked_files)
+        return payload, issue_payload(
+            exit_code=EXIT_CODES["output_validation_error"],
+            issue_code="OUT001_SCHEMA",
+            message="The output path must be an existing directory.",
+            argument="output",
+        )
+
+    analysis_path = output_path / ANALYSIS_FILENAME
+    analysis: Any = None
+    if not analysis_path.exists():
+        issues.append(
+            output_validation_issue(
+                issue_code="OUT001_SCHEMA",
+                message="analysis.json is missing.",
+                source_file=ANALYSIS_FILENAME,
+            )
+        )
+    else:
+        checked_files.append(ANALYSIS_FILENAME)
+        try:
+            analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            issues.append(
+                output_validation_issue(
+                    issue_code="OUT001_SCHEMA",
+                    message="analysis.json must be valid UTF-8 JSON.",
+                    source_file=ANALYSIS_FILENAME,
+                )
+            )
+        except OSError:
+            issues.append(
+                output_validation_issue(
+                    issue_code="OUT001_SCHEMA",
+                    message="analysis.json could not be read.",
+                    source_file=ANALYSIS_FILENAME,
+                )
+            )
+
+    validate_top_level_analysis_schema(analysis, issues)
+    if isinstance(analysis, dict):
+        validate_analysis_bucket_metrics(analysis, issues)
+        validate_analysis_evidence_and_claims(analysis, issues)
+
+    scanned_files = validate_output_secret_residue(output_path=output_path, issues=issues)
+    checked_files = sorted(set(checked_files + scanned_files))
+    payload = output_validation_summary(issues=issues, checked_files=checked_files)
+
+    if write_report:
+        write_issue = write_output_validation_summary(output_path=output_path, payload=payload)
+        if write_issue is not None:
+            return payload, write_issue
+
+    if issues:
+        first_issue = issues[0]
+        return payload, issue_payload(
+            exit_code=EXIT_CODES["output_validation_error"],
+            issue_code=str(first_issue["issue_code"]),
+            message=str(first_issue["message"]),
+            argument="output",
+            source_file=str(first_issue.get("source_file", ANALYSIS_FILENAME)),
+        )
+    return payload, None
+
+
 def write_state_summary(*, output_path: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
     try:
         (output_path / STATE_SUMMARY_FILENAME).write_text(
@@ -3267,11 +3690,12 @@ def success_payload(
     state_summary: dict[str, Any],
     evidence_summary: dict[str, Any],
     analysis_summary: dict[str, Any],
+    output_validation_summary_payload: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "schema_version": "0.1",
         "stage": CLI_STAGE,
-        "run_status": "analysis_ready",
+        "run_status": "analysis_validated",
         "exit_code": EXIT_CODES["ok"],
         "bundle": {
             "name": bundle_path.name,
@@ -3296,6 +3720,8 @@ def success_payload(
             "evidence_summary_created": True,
             "analysis_json_file": ANALYSIS_FILENAME,
             "analysis_json_created": True,
+            "output_validation_file": OUTPUT_VALIDATION_FILENAME,
+            "output_validation_created": True,
             "sanitization_report_created": True,
             "sanitization_report_file": SANITIZATION_REPORT,
         },
@@ -3358,6 +3784,15 @@ def success_payload(
             "claim_count": len(analysis_summary["claims"]),
             "raw_excerpts_emitted": False,
         },
+        "output_validation": {
+            "output_validation_file": OUTPUT_VALIDATION_FILENAME,
+            "status": output_validation_summary_payload["status"],
+            "exit_code": output_validation_summary_payload["exit_code"],
+            "checks": output_validation_summary_payload["checks"],
+            "issue_counts": output_validation_summary_payload["issue_counts"],
+            "checked_file_count": len(output_validation_summary_payload["checked_files"]),
+            "raw_excerpts_emitted": False,
+        },
         "implemented_scope": [
             "parse --bundle and --output",
             "validate bundle directory existence",
@@ -3388,10 +3823,12 @@ def success_payload(
             "create evidence and claim summaries without raw excerpts",
             "write evidence-summary.json without raw excerpts",
             "write analysis.json without raw excerpts",
+            "validate analysis.json structure, evidence references, claim evidence, and secret residue",
+            "write output-validation.json without raw excerpts",
         ],
         "deferred_scope": [
-            "analysis.json output validator",
             "openbell-report.md generation",
+            "OUT004 report claim sentence validation after openbell-report.md exists",
             "M-016 through M-017 pipeline benchmark metric calculation",
         ],
         "exit_code_skeleton": EXIT_CODES,
@@ -3494,6 +3931,10 @@ def run(bundle_arg: str, output_arg: str) -> int:
     if issue is not None:
         write_stderr_json(issue)
         return int(issue["exit_code"])
+    output_validation_summary_payload, issue = validate_output_directory(output_path=output_path, write_report=True)
+    if issue is not None:
+        write_stderr_json(issue)
+        return int(issue["exit_code"])
 
     payload = success_payload(
         bundle_path=bundle_path,
@@ -3505,6 +3946,7 @@ def run(bundle_arg: str, output_arg: str) -> int:
         state_summary=state_summary,
         evidence_summary=evidence_summary,
         analysis_summary=analysis_summary,
+        output_validation_summary_payload=output_validation_summary_payload,
     )
     issue = write_summary(output_path=output_path, payload=payload)
     if issue is not None:

@@ -1,8 +1,8 @@
-"""CLI, bundle-preflight, sanitizer, row-parser, bucket, metric, state, claim, and analysis tests.
+"""CLI, bundle-preflight, sanitizer, row-parser, bucket, metric, state, claim, analysis, and output validation tests.
 
-P4-14 keeps the shared command-line entry point and adds the final
-machine-verifiable analysis.json on top of metric, state, and evidence
-summaries. The script still must not create the human-readable Markdown report.
+P4-15 keeps the shared command-line entry point, validates the final
+machine-verifiable analysis.json, and still must not create the human-readable
+Markdown report.
 """
 
 from __future__ import annotations
@@ -24,6 +24,14 @@ SCRIPT_PATH = (
     / "openbell-guard"
     / "scripts"
     / "run_openbell.py"
+)
+VALIDATOR_SCRIPT_PATH = (
+    PROJECT_ROOT
+    / "src"
+    / "skills"
+    / "openbell-guard"
+    / "scripts"
+    / "validate_bundle.py"
 )
 FIXTURE_BUNDLE = (
     PROJECT_ROOT
@@ -82,6 +90,16 @@ def load_run_openbell_module():
 def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(SCRIPT_PATH), *args],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def run_validator(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(VALIDATOR_SCRIPT_PATH), *args],
         cwd=PROJECT_ROOT,
         text=True,
         capture_output=True,
@@ -186,7 +204,7 @@ class RunOpenBellCliTest(unittest.TestCase):
             module.EXIT_CODES,
         )
 
-    def test_success_creates_output_summary_without_analysis_outputs(self) -> None:
+    def test_success_creates_output_summary_with_validated_analysis(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = Path(temp_dir) / "openbell-out"
             completed = run_cli("--bundle", str(FIXTURE_BUNDLE), "--output", str(output_path))
@@ -196,12 +214,13 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertTrue(summary_path.exists())
 
             payload = json.loads(summary_path.read_text(encoding="utf-8"))
-            self.assertEqual("P4-14", payload["stage"])
-            self.assertEqual("analysis_ready", payload["run_status"])
+            self.assertEqual("P4-15", payload["stage"])
+            self.assertEqual("analysis_validated", payload["run_status"])
             self.assertFalse(payload["bundle"]["raw_telemetry_records_parsed"])
             self.assertTrue(payload["bundle"]["sanitized_telemetry_records_parsed"])
             self.assertFalse(payload["bundle"]["raw_excerpts_emitted"])
             self.assertTrue(payload["outputs"]["analysis_json_created"])
+            self.assertTrue(payload["outputs"]["output_validation_created"])
             self.assertTrue(payload["outputs"]["sanitization_report_created"])
             self.assertTrue(payload["outputs"]["record_summary_created"])
             self.assertTrue(payload["outputs"]["bucket_summary_created"])
@@ -218,6 +237,7 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertTrue((output_path / "state-summary.json").exists())
             self.assertTrue((output_path / "evidence-summary.json").exists())
             self.assertTrue((output_path / "analysis.json").exists())
+            self.assertTrue((output_path / "output-validation.json").exists())
             self.assertEqual("logs.jsonl", payload["telemetry"]["primary_telemetry"])
             self.assertEqual(9, payload["telemetry"]["record_counts"]["total"]["physical_record_count"])
             self.assertEqual(9, payload["telemetry"]["record_counts"]["total"]["accepted_record_count"])
@@ -256,6 +276,10 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertEqual("domestic-market-open-min", payload["analysis"]["fixture_id"])
             self.assertEqual(3, payload["analysis"]["bucket_metric_count"])
             self.assertGreaterEqual(payload["analysis"]["claim_count"], 3)
+            self.assertEqual("passed", payload["output_validation"]["status"])
+            self.assertEqual(0, payload["output_validation"]["exit_code"])
+            self.assertEqual("passed", payload["output_validation"]["checks"]["analysis_schema"])
+            self.assertEqual("not_applicable_until_p4_16", payload["output_validation"]["checks"]["report_claim_refs"])
 
             serialized = json.dumps(payload, ensure_ascii=False)
             self.assertNotIn(str(FIXTURE_BUNDLE), serialized)
@@ -430,7 +454,7 @@ class SanitizationTest(unittest.TestCase):
             self.assertEqual(original_logs, (bundle_path / "logs.jsonl").read_text(encoding="utf-8"))
 
             summary = json.loads((output_path / "openbell-cli-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-14", summary["stage"])
+            self.assertEqual("P4-15", summary["stage"])
             self.assertTrue(summary["outputs"]["sanitization_report_created"])
             self.assertTrue(summary["outputs"]["analysis_json_created"])
             self.assertEqual(7, summary["sanitization"]["total_redactions"])
@@ -635,7 +659,7 @@ class BucketSummaryTest(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             bucket_summary = json.loads((output_path / "bucket-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-14", bucket_summary["stage"])
+            self.assertEqual("P4-15", bucket_summary["stage"])
             self.assertEqual("UTC", bucket_summary["time_basis"])
             self.assertEqual("Asia/Seoul", bucket_summary["display_timezone"])
             self.assertEqual(["service_path", "bucket_start_utc"], bucket_summary["sort_order"])
@@ -701,7 +725,7 @@ class BasicMetricSummaryTest(unittest.TestCase):
             metric_summary = json.loads((output_path / "metric-summary.json").read_text(encoding="utf-8"))
             expected_analysis = json.loads(EXPECTED_ANALYSIS.read_text(encoding="utf-8"))
 
-            self.assertEqual("P4-14", metric_summary["stage"])
+            self.assertEqual("P4-15", metric_summary["stage"])
             self.assertEqual("logs.jsonl", metric_summary["primary_telemetry"])
             self.assertEqual(
                 [
@@ -1260,7 +1284,7 @@ class StateSummaryTest(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             state_summary = json.loads((output_path / "state-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-14", state_summary["stage"])
+            self.assertEqual("P4-15", state_summary["stage"])
             self.assertEqual("complete", state_summary["run"]["status"])
             self.assertEqual(0, state_summary["run"]["exit_code"])
             self.assertEqual([], state_summary["run"]["limitations"])
@@ -1405,7 +1429,7 @@ class EvidenceClaimSummaryTest(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             evidence_summary = json.loads((output_path / "evidence-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-14", evidence_summary["stage"])
+            self.assertEqual("P4-15", evidence_summary["stage"])
             self.assertEqual("complete", evidence_summary["status"])
             self.assertFalse(evidence_summary["raw_excerpts_emitted"])
             self.assertGreaterEqual(evidence_summary["evidence_count"], 4)
@@ -1484,7 +1508,7 @@ class AnalysisJsonOutputTest(unittest.TestCase):
             analysis = json.loads((output_path / "analysis.json").read_text(encoding="utf-8"))
 
             self.assertEqual("1.0", analysis["schema_version"])
-            self.assertEqual("P4-14", analysis["stage"])
+            self.assertEqual("P4-15", analysis["stage"])
             self.assertEqual(expected["contract_version"], analysis["contract_version"])
             self.assertEqual(expected["contract_sha256"], analysis["contract_sha256"])
             self.assertEqual(expected["fixture_id"], analysis["fixture_id"])
@@ -1563,6 +1587,98 @@ class AnalysisJsonOutputTest(unittest.TestCase):
                 self.assertNotIn(secret, serialized)
             self.assertNotIn("Authorization: Bearer", serialized)
             self.assertNotIn("api_key=", serialized)
+
+
+class OutputValidationTest(unittest.TestCase):
+    def test_standalone_validator_accepts_fixture_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "openbell-out"
+            completed = run_cli("--bundle", str(FIXTURE_BUNDLE), "--output", str(output_path))
+            self.assertEqual(0, completed.returncode, completed.stderr)
+
+            validated = run_validator("--output", str(output_path))
+
+            self.assertEqual(0, validated.returncode, validated.stderr)
+            payload = json.loads(validated.stdout)
+            self.assertEqual("P4-15", payload["stage"])
+            self.assertEqual("passed", payload["status"])
+            self.assertEqual(0, payload["exit_code"])
+            self.assertEqual("passed", payload["checks"]["analysis_schema"])
+            self.assertEqual("passed", payload["checks"]["evidence_references"])
+            self.assertEqual("passed", payload["checks"]["confirmed_fact_evidence"])
+            self.assertEqual("not_applicable_until_p4_16", payload["checks"]["report_claim_refs"])
+            self.assertEqual("passed", payload["checks"]["secret_residue"])
+            self.assertIn("analysis.json", payload["checked_files"])
+
+    def test_validator_fails_out001_for_internal_threshold_key_leak(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "openbell-out"
+            completed = run_cli("--bundle", str(FIXTURE_BUNDLE), "--output", str(output_path))
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            analysis_path = output_path / "analysis.json"
+            analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
+            breach_reason = analysis["bucket_metrics"][1]["breach_reasons"][0]
+            breach_reason["threshold_key"] = "error_rate_pct_max"
+            analysis_path.write_text(json.dumps(analysis, ensure_ascii=False), encoding="utf-8")
+
+            validated = run_validator("--output", str(output_path))
+
+            self.assertEqual(5, validated.returncode)
+            self.assertIn("OUT001_SCHEMA", validated.stderr)
+            validation_report = json.loads((output_path / "output-validation.json").read_text(encoding="utf-8"))
+            self.assertEqual("failed", validation_report["status"])
+            self.assertEqual("failed", validation_report["checks"]["analysis_schema"])
+
+    def test_validator_fails_out002_for_broken_evidence_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "openbell-out"
+            completed = run_cli("--bundle", str(FIXTURE_BUNDLE), "--output", str(output_path))
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            analysis_path = output_path / "analysis.json"
+            analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
+            analysis["claims"][0]["evidence_refs"] = ["E-999"]
+            analysis_path.write_text(json.dumps(analysis, ensure_ascii=False), encoding="utf-8")
+
+            validated = run_validator("--output", str(output_path))
+
+            self.assertEqual(5, validated.returncode)
+            self.assertIn("OUT002_BROKEN_EVIDENCE_REF", validated.stderr)
+            validation_report = json.loads((output_path / "output-validation.json").read_text(encoding="utf-8"))
+            self.assertEqual("failed", validation_report["checks"]["evidence_references"])
+
+    def test_validator_fails_out003_for_confirmed_fact_without_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "openbell-out"
+            completed = run_cli("--bundle", str(FIXTURE_BUNDLE), "--output", str(output_path))
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            analysis_path = output_path / "analysis.json"
+            analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
+            analysis["claims"][0]["evidence_refs"] = []
+            analysis_path.write_text(json.dumps(analysis, ensure_ascii=False), encoding="utf-8")
+
+            validated = run_validator("--output", str(output_path))
+
+            self.assertEqual(5, validated.returncode)
+            self.assertIn("OUT003_FACT_WITHOUT_EVIDENCE", validated.stderr)
+            validation_report = json.loads((output_path / "output-validation.json").read_text(encoding="utf-8"))
+            self.assertEqual("failed", validation_report["checks"]["confirmed_fact_evidence"])
+
+    def test_validator_fails_out005_for_secret_residue(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "openbell-out"
+            completed = run_cli("--bundle", str(FIXTURE_BUNDLE), "--output", str(output_path))
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            analysis_path = output_path / "analysis.json"
+            analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
+            analysis["debug_secret"] = "api_key=plainsecretvalue"
+            analysis_path.write_text(json.dumps(analysis, ensure_ascii=False), encoding="utf-8")
+
+            validated = run_validator("--output", str(output_path))
+
+            self.assertEqual(5, validated.returncode)
+            self.assertIn("OUT005_SECRET_RESIDUE", validated.stderr)
+            validation_report = json.loads((output_path / "output-validation.json").read_text(encoding="utf-8"))
+            self.assertEqual("failed", validation_report["checks"]["secret_residue"])
 
 
 if __name__ == "__main__":

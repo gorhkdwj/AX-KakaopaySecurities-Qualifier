@@ -1069,3 +1069,36 @@ P4-14에서 `record-summary.json`, `metric-summary.json`, `state-summary.json`, 
 - `state-summary.json` 등 중간 산출물은 디버깅과 단계 검증용으로 남기되, 후속 보고서의 기준은 `analysis.json`입니다.
 - 향후 제출 패키징에서 중간 산출물을 줄일 필요가 생기면 `analysis.json`을 기준으로 보존 범위를 재검토합니다.
 - P4-15에서 schema 요구가 바뀌면 `analysis.json`의 필드 집합과 D-031을 함께 재검토합니다.
+
+### D-032 · P4-15 출력 검증기는 analysis 산출물 검증에 집중하고 보고서 문장 검증은 P4-16으로 둠
+
+**상황**
+
+P4-15에서 출력 검증기를 구현하면서 `OUT001_SCHEMA`, `OUT002_BROKEN_EVIDENCE_REF`, `OUT003_FACT_WITHOUT_EVIDENCE`, `OUT004_REPORT_CLAIM_REF`, `OUT005_SECRET_RESIDUE`를 어떻게 나눠 적용할지 결정해야 했습니다. 현재 단계에는 `analysis.json`과 중간 산출물은 존재하지만 사람용 Markdown 보고서인 `openbell-report.md`는 아직 생성되지 않습니다.
+
+**검토한 선택지**
+
+1. P4-15에서 `analysis.json`과 아직 없는 `openbell-report.md` 검증까지 모두 구현합니다.
+2. P4-15에서는 검증기를 만들지 않고 P4-16 보고서 생성 후 한 번에 검증합니다.
+3. P4-15에서는 `analysis.json`과 생성 산출물 검증을 구현하고, 보고서 문장 claim ID 검증인 `OUT004_REPORT_CLAIM_REF`는 P4-16에서 보고서가 생긴 뒤 활성화합니다.
+
+**결정**
+
+- 선택지 3을 채택합니다.
+- P4-15의 자체 검증기는 `analysis.json` 구조, 계약 버전·SHA, bucket breach reason 최종 필드, evidence ID 유일성, claim ID·marker, evidence 참조 무결성, `confirmed_fact` 근거 존재 여부, 생성 산출물의 민감정보 잔존 여부를 검사합니다.
+- 검증 결과는 `output-validation.json`으로 저장하며, 실패 시 `exit 5`와 `OUT001`, `OUT002`, `OUT003`, `OUT005` 중 하나를 반환합니다.
+- `OUT004_REPORT_CLAIM_REF`는 `openbell-report.md`가 아직 없으므로 `not_applicable_until_p4_16`으로 명시하고, P4-16에서 보고서 생성 후 활성화합니다.
+
+**근거**
+
+- 존재하지 않는 보고서 검증을 미리 흉내 내면 구현되지 않은 기능을 제공하는 것처럼 보일 수 있습니다.
+- 반대로 검증기를 P4-16까지 미루면 P4-15 이전에 만든 `analysis.json` 오류가 보고서 작성 단계까지 전파될 수 있습니다.
+- `analysis.json`은 보고서 생성의 기준 원장이므로, 원장 자체의 schema와 참조 무결성은 보고서보다 먼저 독립 검증하는 것이 안전합니다.
+- T-013에서 확인한 내부 필드 누출 문제는 P4-15 검증기가 즉시 잡아야 하는 대표 오류입니다.
+
+**영향 및 재검토 조건**
+
+- `run_openbell.py`는 `analysis.json` 작성 직후 `validate_output_directory()`를 실행하고 통과해야 `analysis_validated` 상태로 성공합니다.
+- 독립 실행기 `validate_bundle.py --output <dir>`는 이미 생성된 출력 디렉터리도 재검증할 수 있습니다.
+- P4-16에서 `openbell-report.md`가 생성되면 `OUT004_REPORT_CLAIM_REF`를 실제 검증으로 전환해야 합니다.
+- 검증 항목이 늘어나면 `output-validation.json`의 `checks` 필드와 관련 테스트를 함께 갱신합니다.

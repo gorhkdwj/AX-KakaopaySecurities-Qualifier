@@ -2164,3 +2164,67 @@
 - 다음 단계는 P4-15 출력 검증기입니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-052 요약을 추가하고 D-031 하위 페이지를 생성했으며, fetch로 두 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이고 D-031 URL은 `https://app.notion.com/p/38e05ea68bfc8180ac49c4c5d89d49c4`입니다.
 - Git 동기화 완료: P4-14 산출물과 W-052/D-031/T-013 기록을 커밋 `7034529b63882c1020247c11952f875bddbf8917`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영합니다.
+
+### W-053 · Phase 4 P4-15 출력 검증기
+
+**요청**
+
+- 다음 단계 구현을 진행합니다. 현재 순서상 P4-15 출력 검증기를 구현합니다.
+
+**수행 작업**
+
+- `run_openbell.py`의 단계명을 P4-15로 올렸습니다.
+- `analysis.json` 작성 직후 `validate_output_directory()`를 실행하도록 연결했습니다.
+- 검증 통과 시 CLI 성공 요약의 `run_status`를 `analysis_validated`로 보고하고, `output-validation.json`을 생성하도록 했습니다.
+- 독립 실행기 `validate_bundle.py --output <dir>`를 추가해 이미 생성된 출력 디렉터리도 다시 검증할 수 있게 했습니다.
+- 검증 범위는 `analysis.json` schema, 계약 버전·SHA, bucket breach reason 최종 필드, evidence ID·source, claim ID·marker, evidence 참조 무결성, `confirmed_fact` 근거 존재 여부, 생성 산출물 민감정보 잔존 여부로 정했습니다.
+- 아직 `openbell-report.md`가 없으므로 `OUT004_REPORT_CLAIM_REF`는 `not_applicable_until_p4_16`으로 명시하고 P4-16에서 활성화하기로 했습니다.
+- `SKILL.md`를 정상 UTF-8 한국어 문서로 재작성하고 P4-15 실행·검증 절차를 반영했습니다.
+- D-032와 T-014를 기록했습니다.
+
+**변경 파일**
+
+- 수정: `src/skills/openbell-guard/scripts/run_openbell.py`
+- 추가: `src/skills/openbell-guard/scripts/validate_bundle.py`
+- 수정: `src/tests/test_run_openbell_cli.py`
+- 수정: `src/skills/openbell-guard/SKILL.md`
+- 수정: `Decisionlog.md`
+- 수정: `Troubleshootinglog.md`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `python -m py_compile .\src\skills\openbell-guard\scripts\run_openbell.py .\src\skills\openbell-guard\scripts\validate_bundle.py .\src\tests\test_run_openbell_cli.py`가 통과했습니다.
+- `python -m unittest .\src\tests\test_run_openbell_cli.py -v`를 실행해 CLI·입력 검사·마스킹·행 단위 파서·버킷·M-001~M-015·상태 판정·evidence·claim·analysis·출력 검증기 테스트 39개가 모두 통과했습니다.
+- `python -m unittest discover -s src\tests -v`를 실행해 전체 테스트 51개가 모두 통과했습니다.
+- `python .\tools\preflight_check.py --quiet` 결과 `SUMMARY ok=5 warn=0 error=0`을 확인했습니다.
+- `python $env:USERPROFILE\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src`가 `Plugin validation passed`로 통과했습니다.
+- `python -X utf8 $env:USERPROFILE\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard`가 `Skill is valid!`로 통과했습니다.
+- `python .\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\src\tests\fixtures\domestic-market-open-min\bundle --output .\out\p4-15-smoke`를 실행해 exit 0, `stage=P4-15`, `run_status=analysis_validated`, `analysis_json_created=true`, `output_validation_created=true`, `output_validation.status=passed`, `bucket_metric_count=3`, `evidence_count=5`, `claim_count=5`를 확인했습니다.
+- `python .\src\skills\openbell-guard\scripts\validate_bundle.py --output .\out\p4-15-smoke`를 실행해 exit 0, `status=passed`, `analysis_schema=passed`, `evidence_references=passed`, `confirmed_fact_evidence=passed`, `secret_residue=passed`, `report_claim_refs=not_applicable_until_p4_16`을 확인했습니다.
+- `out/p4-15-smoke` 주요 산출물에서 원문 로그 문구 `market data request synthetic timeout`, `Authorization: Bearer `, `api_key=`, `sk-`, `eyJ` 패턴이 발견되지 않음을 확인했습니다.
+- `logs/` 파일은 수동 편집하지 않았습니다.
+
+**트러블슈팅**
+
+- T-014를 기록했습니다.
+- `SKILL.md` 갱신 중 PowerShell 출력에서 한글이 깨져 보이고 줄 단위 `apply_patch`가 기존 문구를 찾지 못했습니다.
+- `rg`로 파일 자체가 정상 UTF-8임을 확인한 뒤, 기존 의미를 보존하면서 정상 한국어 문서로 재작성하고 Skill 검증기를 통과시켰습니다.
+
+**판단 근거**
+
+- `analysis.json`은 사람용 보고서의 입력이므로, 보고서 생성 전에 구조·근거 참조·비밀정보 잔존 여부를 먼저 기계적으로 차단해야 합니다.
+- `OUT004_REPORT_CLAIM_REF`는 실제 보고서 문장 검증이므로, 보고서가 아직 없는 P4-15에서 억지로 구현하지 않고 P4-16으로 미루는 것이 정합성에 맞습니다.
+- P4-14에서 겪은 T-013 내부 필드 누출 문제를 P4-15 검증기가 직접 잡도록 `breach_reasons` 허용 필드를 엄격히 검사했습니다.
+- 독립 실행기 `validate_bundle.py`를 두면 이후 보고서 생성·통합 시나리오·제출 패키징 전에 같은 산출물을 반복 검증할 수 있습니다.
+
+**결과**
+
+- P4-15가 완료됐습니다. 이제 OpenBell Guard는 `analysis.json` 생성 직후 `output-validation.json`으로 자체 검증을 완료해야 성공합니다.
+- 관련 결정: D-032 `P4-15 출력 검증기는 analysis 산출물 검증에 집중하고 보고서 문장 검증은 P4-16으로 둠`
+- 관련 트러블슈팅: T-014 `SKILL.md 한글 문서의 줄 단위 패치가 실패한 문제`
+- 현재 단계는 Phase 4의 P4-15/19이며, P4-14 analysis/sanitization 출력 다음의 출력 검증기 단계입니다.
+- 남은 태스크는 P4-16~P4-19 약 4단계이며, 예상 작업량은 높음입니다.
+- 다음 단계는 P4-16 Skill 보고서 워크플로입니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-053 요약을 추가하고 D-032 하위 페이지를 생성했으며, fetch로 두 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이고 D-032 URL은 `https://app.notion.com/p/38e05ea68bfc81c6a7cef082e4b1ab49`입니다.
+- Git 동기화 대기: P4-15 산출물과 W-053/D-032/T-014 기록을 커밋하고 원격 `origin/main`에 push해야 합니다.
