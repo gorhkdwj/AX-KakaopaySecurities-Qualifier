@@ -1975,3 +1975,63 @@
 - 다음 단계는 P4-12 메트릭 fallback과 CPU·메모리 맥락 지표 M-015입니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-049 요약을 추가하고 D-028 하위 페이지를 생성했으며, fetch로 두 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이고 D-028 URL은 `https://app.notion.com/p/38e05ea68bfc814fb078c3ea0289142d`입니다.
 - Git 동기화 완료: P4-11 산출물과 W-049/D-028 기록을 커밋 `91c14941b175b2a5ae17942e5e3915c4ad15bc8f`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영합니다.
+
+### W-050 · Phase 4 P4-12 메트릭 fallback과 CPU·메모리 맥락 지표
+
+**요청**
+
+- 다음 단계 구현을 진행합니다. 현재 순서상 P4-12 메트릭 fallback과 CPU·메모리 맥락 지표 M-015를 구현합니다.
+
+**수행 작업**
+
+- `run_openbell.py`의 단계명을 P4-12로 올렸습니다.
+- 기존 로그 우선·메트릭 fallback 흐름을 유지하면서, CPU·메모리 percent 표본을 주 계산 소스 선택과 독립적으로 집계하도록 했습니다.
+- `metric-summary.json`에 `context_metrics`, `context_metric_count`, M-015 계산 ID를 추가했습니다.
+- M-015 `cpu_utilization_median_pct`, `memory_utilization_median_pct`를 서비스 경로 × UTC 60초 버킷별 중앙값으로 계산했습니다.
+- CPU·메모리 개별 표본 목록은 출력하지 않고 중앙값, 표본 수, 근거 위치와 `individual_values_emitted=false`만 남겼습니다.
+- `metrics.csv` fallback에서 같은 버킷의 `error_count > request_count`가 발견되면 `MET001_COUNT_INCONSISTENT`로 기록하고 요청 수, 오류 수, 처리량, 오류율을 무효화하도록 했습니다.
+- MET001 발생 시 `metric-summary.json`과 `state-summary.json`이 degraded limitation을 표시하도록 연결했습니다.
+- `src/tests/test_run_openbell_cli.py`에 fixture M-015 보존, 메트릭 fallback 중앙값, MET001 무효화와 state degraded 테스트를 추가했습니다.
+- `src/skills/openbell-guard/SKILL.md`를 P4-12 현재 구현 범위와 한계에 맞게 갱신했습니다.
+- D-029를 기록했습니다.
+- 이번 단계에서는 evidence·claim, 최종 `analysis.json`, M-016~M-017 benchmark를 구현하지 않았습니다.
+
+**변경 파일**
+
+- 수정: `src/skills/openbell-guard/scripts/run_openbell.py`
+- 수정: `src/tests/test_run_openbell_cli.py`
+- 수정: `src/skills/openbell-guard/SKILL.md`
+- 수정: `Decisionlog.md`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `python -m py_compile .\src\skills\openbell-guard\scripts\run_openbell.py .\src\tests\test_run_openbell_cli.py`가 통과했습니다.
+- `python -m unittest .\src\tests\test_run_openbell_cli.py -v`를 실행해 CLI·입력 검사·마스킹·행 단위 파서·버킷·M-001~M-015·상태 판정 테스트 30개가 모두 통과했습니다.
+- `python -m unittest discover -s src\tests -v`를 실행해 전체 테스트 42개가 모두 통과했습니다.
+- `python tools/preflight_check.py --quiet` 결과 `ok=5`, `warn=0`, `error=0`을 확인했습니다.
+- `python $env:USERPROFILE\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src`가 통과했습니다.
+- `python -X utf8 $env:USERPROFILE\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard`가 `Skill is valid!`로 통과했습니다.
+- `python .\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\src\tests\fixtures\domestic-market-open-min\bundle --output .\out\p4-12-smoke`를 실행해 exit 0, `stage=P4-12`, `run_status=context_metrics_ready`, `calculated_m_ids=M-001~M-013 및 M-015`, `context_metric_count=1`, `state.run_status=complete`, `analysis_json_created=false`를 확인했습니다.
+- `out/p4-12-smoke` 주요 산출물을 `run_openbell.py`의 `find_sensitive_matches` 함수로 재검사했고 `no_sensitive_residue`를 확인했습니다.
+- `logs/` 파일은 수동 편집하지 않았습니다.
+
+**트러블슈팅**
+
+- 새 T-ID는 없습니다.
+
+**판단 근거**
+
+- CPU·메모리 값은 원인 가설의 맥락 자료일 뿐 장애 판정 임계치가 아니므로, `bucket_metrics`가 아니라 `context_metrics`로 분리했습니다.
+- 로그가 주 소스일 때도 `metrics.csv`의 CPU·메모리 맥락을 보존해야 하므로, M-015는 주 계산 소스 선택과 독립적으로 처리했습니다.
+- `error_count > request_count`는 메트릭 fallback 집계 신뢰도 문제이므로 조용히 오류율을 계산하지 않고 MET001과 degraded limitation으로 노출했습니다.
+
+**결과**
+
+- P4-12가 완료됐습니다. 이제 OpenBell Guard는 로그 우선·메트릭 fallback 흐름을 유지하면서 CPU·메모리 맥락 지표 M-015를 `context_metrics`에 계산하고, MET001 집계 불일치를 degraded로 표시합니다.
+- 관련 결정: D-029 `CPU·메모리 M-015는 장애 판정 지표와 분리해 context_metrics로 보존`
+- 현재 단계는 Phase 4의 P4-12/19이며, P4-11 상태 판정 다음의 메트릭 fallback·맥락 지표 단계입니다.
+- 남은 태스크는 P4-13~P4-19 약 7단계이며, 예상 작업량은 높음입니다.
+- 다음 단계는 P4-13 evidence·claim 구성입니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-050 요약을 추가하고 D-029 하위 페이지를 생성했으며, fetch로 두 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이고 D-029 URL은 `https://app.notion.com/p/38e05ea68bfc810cbe7fe28b16d60355`입니다.
+- Git 동기화 상태: 대기 — P4-12 산출물과 W-050/D-029 기록을 커밋 후 원격 `origin/main`에 push합니다.

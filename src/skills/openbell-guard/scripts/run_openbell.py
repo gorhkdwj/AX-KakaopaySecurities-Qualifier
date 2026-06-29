@@ -1,9 +1,9 @@
 """OpenBell Guard command-line entry point.
 
-P4-11 implements the shared CLI, bundle preflight gate, sanitizer,
+P4-12 implements the shared CLI, bundle preflight gate, sanitizer,
 line-oriented telemetry parser, 60-second bucket preparation, basic bucket
 metrics, observability lag metrics, baseline-vs-incident comparisons, and
-threshold-based state judgment:
+threshold-based state judgment with context metrics:
 
 - parse ``--bundle`` and ``--output``;
 - verify that the bundle is an existing, non-symlink directory;
@@ -20,6 +20,10 @@ threshold-based state judgment:
   per-record values.
 - calculate M-010 through M-013 baseline median, incident peak, absolute
   change, and percent change for comparable bucket metrics.
+- calculate M-015 CPU and memory utilization median context metrics from
+  metrics.csv without using them for outage threshold judgment.
+- invalidate metrics fallback count buckets when error_count exceeds
+  request_count and report MET001_COUNT_INCONSISTENT.
 - judge bucket state, service-path state, outage start, recovery time, and
   successful run status into ``state-summary.json``.
 
@@ -51,7 +55,7 @@ EXIT_CODES = {
     "output_validation_error": 5,
 }
 
-CLI_STAGE = "P4-11"
+CLI_STAGE = "P4-12"
 SUMMARY_FILENAME = "openbell-cli-summary.json"
 SANITIZED_BUNDLE_DIR = "sanitized-bundle"
 SANITIZATION_REPORT = "sanitization-report.md"
@@ -64,7 +68,10 @@ CONTRACT_VERSION = "1.0.0"
 BASIC_METRIC_IDS = ("M-001", "M-002", "M-003", "M-004", "M-005", "M-006", "M-007")
 OBSERVABILITY_METRIC_IDS = ("M-008", "M-009")
 COMPARISON_METRIC_IDS = ("M-010", "M-011", "M-012", "M-013")
-CALCULATED_METRIC_IDS = BASIC_METRIC_IDS + OBSERVABILITY_METRIC_IDS + COMPARISON_METRIC_IDS
+CONTEXT_METRIC_IDS = ("M-015",)
+CALCULATED_METRIC_IDS = (
+    BASIC_METRIC_IDS + OBSERVABILITY_METRIC_IDS + COMPARISON_METRIC_IDS + CONTEXT_METRIC_IDS
+)
 COMPARABLE_BUCKET_METRICS = (
     "request_count",
     "error_count",
@@ -216,7 +223,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="run_openbell.py",
         description=(
-            "Prepare an OpenBell Guard run directory. P4-11 validates the CLI, "
+            "Prepare an OpenBell Guard run directory. P4-12 validates the CLI, "
             "paths, bundle file contract, byte limits, incident metadata, and "
             "creates a masked working copy, telemetry record summary, bucket summary, "
             "metric summary, and threshold-based state summary."
@@ -1062,6 +1069,18 @@ def metric_value(
     return payload
 
 
+def context_metric_value(*, value: int | float | None, sample_count: int) -> dict[str, Any]:
+    payload = metric_value(
+        m_id="M-015",
+        value=value,
+        unit="percent",
+        sample_count=sample_count,
+        reason_code="missing_input" if sample_count == 0 else None,
+    )
+    payload["individual_values_emitted"] = False
+    return payload
+
+
 def nearest_rank_raw_value(samples: list[float], percentile: Decimal, minimum_sample_count: int) -> tuple[float | None, str | None]:
     if len(samples) < minimum_sample_count:
         return None, "insufficient_sample"
@@ -1383,6 +1402,7 @@ def service_path_state(service_path: str, bucket_states: list[dict[str, Any]]) -
 def run_state_from_summaries(
     *,
     record_summary: dict[str, Any],
+    metric_issue_counts: dict[str, int],
     service_paths: list[dict[str, Any]],
     bucket_states: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -1403,6 +1423,13 @@ def run_state_from_summaries(
                 "message": "Rejected rows or dropped optional fields were detected.",
             }
         )
+    if metric_issue_counts:
+        limitations.append(
+            {
+                "reason_code": "metric_quality_degraded",
+                "message": "Metric aggregation issues were detected.",
+            }
+        )
     if any(path["status"] == "unknown" for path in service_paths):
         limitations.append(
             {
@@ -1418,7 +1445,9 @@ def run_state_from_summaries(
             }
         )
 
-    issue_counts = record_summary.get("issue_counts", {})
+    issue_counts = dict(record_summary.get("issue_counts", {}))
+    for issue_code, count in metric_issue_counts.items():
+        issue_counts[issue_code] = int(issue_counts.get(issue_code, 0)) + int(count)
     return {
         "status": "degraded" if limitations else "complete",
         "exit_code": EXIT_CODES["ok"],
@@ -1431,6 +1460,7 @@ def build_state_summary(
     *,
     incident_summary: dict[str, Any],
     record_summary: dict[str, Any],
+    metric_issue_counts: dict[str, int],
     bucket_metrics: list[dict[str, Any]],
     raw_threshold_values: dict[tuple[str, str], dict[str, float | None]],
 ) -> dict[str, Any]:
@@ -1459,6 +1489,7 @@ def build_state_summary(
     ]
     run_state = run_state_from_summaries(
         record_summary=record_summary,
+        metric_issue_counts=metric_issue_counts,
         service_paths=service_paths,
         bucket_states=bucket_states,
     )
@@ -2185,6 +2216,71 @@ def build_bucket_summary(
     }
 
 
+def build_context_metrics(
+    *, metrics_result: dict[str, Any] | None, incident_summary: dict[str, Any]
+) -> list[dict[str, Any]]:
+    if metrics_result is None:
+        return []
+
+    timezone_name = str(incident_summary["timezone"])
+    groups: dict[tuple[str, str], dict[str, Any]] = {}
+    for record in metrics_result["normalized_records"]:
+        metric_name = record.get("metric_name")
+        if metric_name not in PERCENT_METRIC_NAMES:
+            continue
+
+        timestamp = record["timestamp"]
+        assert isinstance(timestamp, datetime)
+        bucket_start = utc_bucket_start(timestamp)
+        bucket_start_utc = isoformat_utc(bucket_start)
+        service_path = str(record["service_path"])
+        key = (service_path, bucket_start_utc)
+
+        if key not in groups:
+            groups[key] = {
+                "service_path": service_path,
+                "window_type": record["window_type"],
+                "bucket_start_utc": bucket_start_utc,
+                "bucket_start_local": isoformat_local(bucket_start, timezone_name),
+                "source_for_m015": "metrics.csv",
+                "source_locations": [],
+                "cpu_utilization_pct": [],
+                "memory_utilization_pct": [],
+            }
+        group = groups[key]
+        if group["window_type"] != record["window_type"]:
+            group["window_type"] = "mixed"
+        group["source_locations"].append(record["source_location"])
+        group[str(metric_name)].append(float(record["value"]))
+
+    context_metrics: list[dict[str, Any]] = []
+    for key in sorted(groups):
+        group = groups[key]
+        cpu_samples = list(group["cpu_utilization_pct"])
+        memory_samples = list(group["memory_utilization_pct"])
+        context_metrics.append(
+            {
+                "service_path": group["service_path"],
+                "window_type": group["window_type"],
+                "bucket_start_utc": group["bucket_start_utc"],
+                "bucket_start_local": group["bucket_start_local"],
+                "source_for_m015": group["source_for_m015"],
+                "source_locations": sorted(group["source_locations"]),
+                "metrics": {
+                    "cpu_utilization_median_pct": context_metric_value(
+                        value=median_value(cpu_samples),
+                        sample_count=len(cpu_samples),
+                    ),
+                    "memory_utilization_median_pct": context_metric_value(
+                        value=median_value(memory_samples),
+                        sample_count=len(memory_samples),
+                    ),
+                },
+            }
+        )
+    return context_metrics
+
+
 def build_metric_summary(
     *,
     logs_result: dict[str, Any] | None,
@@ -2196,6 +2292,7 @@ def build_metric_summary(
     primary_telemetry = record_summary["primary_telemetry"]
     groups: dict[tuple[str, str], dict[str, Any]] = {}
     source_name = "logs.jsonl" if primary_telemetry == "logs.jsonl" else "metrics.csv"
+    metric_issues: list[dict[str, Any]] = []
 
     for record in combined_normalized_records(logs_result=logs_result, metrics_result=metrics_result):
         if primary_telemetry == "logs.jsonl" and record["source_type"] != "log":
@@ -2268,9 +2365,30 @@ def build_metric_summary(
         error_count = int(group["error_count"])
         latency_samples = list(group["latency_samples"])
         ingestion_lag_samples = list(group["ingestion_lag_samples"])
-        throughput = rounded_float(Decimal(request_count) / Decimal(60))
+        count_inconsistent = primary_telemetry == "metrics.csv" and error_count > request_count
+        if count_inconsistent:
+            metric_issues.append(
+                {
+                    "issue_code": "MET001_COUNT_INCONSISTENT",
+                    "severity": "degraded",
+                    "source_file": "metrics.csv",
+                    "source_locations": sorted(group["source_locations"]),
+                    "service_path": group["service_path"],
+                    "bucket_start_utc": group["bucket_start_utc"],
+                    "message": "The metrics.csv bucket has error_count greater than request_count, so request/error aggregation was invalidated.",
+                }
+            )
 
-        if request_count == 0:
+        if count_inconsistent:
+            throughput: int | float | None = None
+        else:
+            throughput = rounded_float(Decimal(request_count) / Decimal(60))
+
+        if count_inconsistent:
+            error_rate_value = None
+            error_rate_raw = None
+            error_rate_reason = "not_applicable"
+        elif request_count == 0:
             error_rate_value: float | None = None
             error_rate_raw: float | None = None
             error_rate_reason = "zero_denominator"
@@ -2314,12 +2432,23 @@ def build_metric_summary(
                 "source_for_m008_m009": group["source_for_m008_m009"],
                 "source_locations": sorted(group["source_locations"]),
                 "metrics": {
-                    "request_count": metric_value(m_id="M-001", value=request_count, unit="count"),
-                    "error_count": metric_value(m_id="M-002", value=error_count, unit="count"),
+                    "request_count": metric_value(
+                        m_id="M-001",
+                        value=None if count_inconsistent else request_count,
+                        unit="count",
+                        reason_code="not_applicable" if count_inconsistent else None,
+                    ),
+                    "error_count": metric_value(
+                        m_id="M-002",
+                        value=None if count_inconsistent else error_count,
+                        unit="count",
+                        reason_code="not_applicable" if count_inconsistent else None,
+                    ),
                     "throughput_rps": metric_value(
                         m_id="M-003",
                         value=throughput,
                         unit="requests/second",
+                        reason_code="not_applicable" if count_inconsistent else None,
                     ),
                     "error_rate_pct": metric_value(
                         m_id="M-004",
@@ -2380,11 +2509,14 @@ def build_metric_summary(
         )
 
     comparison_metrics = build_comparison_metrics(bucket_metrics)
+    context_metrics = build_context_metrics(metrics_result=metrics_result, incident_summary=incident_summary)
+    metric_issue_counts = summarize_issues(metric_issues)
+    metric_status = "degraded" if record_summary["status"] != "success" or metric_issues else "success"
 
     metric_summary = {
         "schema_version": "0.1",
         "stage": CLI_STAGE,
-        "status": record_summary["status"],
+        "status": metric_status,
         "contract_version": CONTRACT_VERSION,
         "calculated_m_ids": list(CALCULATED_METRIC_IDS),
         "primary_telemetry": primary_telemetry,
@@ -2396,11 +2528,16 @@ def build_metric_summary(
         "bucket_metrics": bucket_metrics,
         "comparison_metrics": comparison_metrics,
         "comparison_metric_count": len(comparison_metrics),
+        "context_metrics": context_metrics,
+        "context_metric_count": len(context_metrics),
+        "issue_counts": metric_issue_counts,
+        "issues": metric_issues,
         "raw_excerpts_emitted": False,
     }
     state_summary = build_state_summary(
         incident_summary=incident_summary,
         record_summary=record_summary,
+        metric_issue_counts=metric_issue_counts,
         bucket_metrics=bucket_metrics,
         raw_threshold_values=raw_threshold_values,
     )
@@ -2568,7 +2705,7 @@ def success_payload(
     return {
         "schema_version": "0.1",
         "stage": CLI_STAGE,
-        "run_status": "state_judgment_ready",
+        "run_status": "context_metrics_ready",
         "exit_code": EXIT_CODES["ok"],
         "bundle": {
             "name": bundle_path.name,
@@ -2617,6 +2754,8 @@ def success_payload(
             "primary_telemetry": metric_summary["primary_telemetry"],
             "bucket_count": metric_summary["bucket_count"],
             "comparison_metric_count": metric_summary["comparison_metric_count"],
+            "context_metric_count": metric_summary["context_metric_count"],
+            "issue_counts": metric_summary["issue_counts"],
             "sort_order": metric_summary["sort_order"],
             "raw_excerpts_emitted": False,
         },
@@ -2650,13 +2789,15 @@ def success_payload(
             "calculate M-001 through M-007 basic bucket metrics",
             "calculate M-008 through M-009 observability lag metrics",
             "calculate M-010 through M-013 baseline-vs-incident comparison metrics",
+            "calculate M-015 CPU and memory context metrics",
+            "invalidate metrics fallback count buckets when error_count exceeds request_count",
             "write metric-summary.json without raw excerpts",
             "judge bucket states from configured thresholds",
             "derive service path outage_start and recovery_time from consecutive buckets",
             "write state-summary.json without raw excerpts",
         ],
         "deferred_scope": [
-            "M-015 through M-017 context and pipeline benchmark metric calculation",
+            "M-016 through M-017 pipeline benchmark metric calculation",
             "evidence and claim generation",
             "analysis.json generation",
         ],
