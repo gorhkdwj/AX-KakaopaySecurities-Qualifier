@@ -1642,3 +1642,60 @@
 - 다음 단계는 P4-07 행 단위 파서입니다.
 - Notion 동기화 완료: Phase 4에 W-043 요약을 추가하고 D-026 결정 페이지를 생성했습니다. fetch로 Phase 4 본문에 W-043과 D-026 링크가 포함된 것과 D-026 페이지 본문을 확인했습니다. D-026 URL은 `https://app.notion.com/p/38e05ea68bfc8186b95dd5ecd03bee4b`입니다.
 - Git 동기화 완료: P4-06 산출물과 W-043 1차 기록을 커밋 `8fee06cef544d43add3c486c0404a56f2869bedf`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영합니다.
+
+### W-044 · Phase 4 P4-07 행 단위 파서
+
+**요청**
+
+- 다음 작업을 이어서 진행합니다. 현재 순서상 P4-07 행 단위 파서를 구현합니다.
+
+**수행 작업**
+
+- `engineering:testing-strategy` Skill을 참고해 이번 단계를 데이터 파이프라인의 입력 변환, 오류 처리와 데이터 무결성 테스트로 한정했습니다.
+- `run_openbell.py`의 단계와 실행 상태를 `P4-07`, `records_parsed_ready`로 갱신했습니다.
+- 마스킹된 `logs.jsonl`을 행 단위로 검증해 필수 필드 오류는 행 거부, 선택 필드 오류는 `field_dropped_count`로 집계하도록 했습니다.
+- 마스킹된 `metrics.csv`를 행 단위로 검증해 헤더 오류, 필수 열, 표준 metric_name·unit 조합, 값 범위와 분 경계 조건을 검사하도록 했습니다.
+- `service_path`가 비어 있는 metric 행은 `service-map.json`의 `service_name` 매핑으로 보완하고, 매핑할 수 없으면 행을 거부하도록 했습니다.
+- M-014 기준 `physical_record_count`, `accepted_record_count`, `rejected_record_count`, `outside_analysis_window_count`, `field_dropped_count`를 `record-summary.json`에 기록하도록 했습니다.
+- `REC001`~`REC005`, `FLD001`, `TIM001`, `WRN001`, `INP008`, `LIM002`, `LIM003` 일부 경로를 구현했습니다.
+- `record-summary.json`과 `openbell-cli-summary.json`에는 원문 로그 메시지나 레코드 본문을 넣지 않고, source location과 issue code 중심의 요약만 넣도록 했습니다.
+- `src/tests/test_run_openbell_cli.py`에 로그 행 단위 오류·선택 필드 drop·구간 밖 행·metric service-map fallback·구간 내 유효 레코드 없음·CSV 헤더 오류 테스트를 추가했습니다.
+- `src/skills/openbell-guard/SKILL.md`를 P4-07 현재 구현 범위와 한계에 맞게 갱신했습니다.
+- 이번 단계에서는 M-001~M-013 지표 계산, MET001 버킷 불일치 계산, 최종 `analysis.json` 생성을 구현하지 않았습니다.
+
+**변경 파일**
+
+- 수정: `src/skills/openbell-guard/scripts/run_openbell.py`
+- 수정: `src/tests/test_run_openbell_cli.py`
+- 수정: `src/skills/openbell-guard/SKILL.md`
+- 수정: `Troubleshootinglog.md`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `python -m unittest .\src\tests\test_run_openbell_cli.py -v`를 실행해 CLI·사전 검사·마스킹·행 단위 파서 테스트 19개가 모두 통과했습니다.
+- `python .\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\src\tests\fixtures\domestic-market-open-min\bundle --output .\out\p4-07-smoke`를 실행해 exit 0, `sanitized-bundle/`, `sanitization-report.md`, `record-summary.json`, `openbell-cli-summary.json` 생성을 확인했습니다.
+- smoke 결과는 `stage=P4-07`, `run_status=records_parsed_ready`, `record_summary_created=true`, `analysis_json_created=false`, `primary_telemetry=logs.jsonl`였습니다.
+- smoke `record-summary.json`에서 M-014 총합 `physical_record_count=9`, `accepted_record_count=9`, `rejected_record_count=0`, `outside_analysis_window_count=0`, `field_dropped_count=0`을 확인했습니다.
+- `python -m unittest discover -s .\src\tests -v`를 실행해 전체 테스트 31개가 모두 통과했습니다.
+- `python .\tools\preflight_check.py --quiet` 결과 `ok=5`, `warn=0`, `error=0`을 확인했습니다.
+- `python C:\Users\gorhk\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src`가 통과했습니다.
+- `python -X utf8 C:\Users\gorhk\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard`가 `Skill is valid!`로 통과했습니다.
+- `python -m py_compile .\src\skills\openbell-guard\scripts\run_openbell.py .\src\tests\test_contract_reference.py .\src\tests\test_domestic_market_open_min_fixture.py .\src\tests\test_run_openbell_cli.py .\tools\preflight_check.py`가 통과했습니다.
+- `run_openbell.py`의 `find_sensitive_matches` 함수를 import해 `out/p4-07-smoke` 전체 산출물을 재검사했고, `no_sensitive_residue` 결과로 민감정보 패턴 잔존이 없음을 확인했습니다.
+- `rg -n -i "sk-[A-Za-z0-9]|password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|secret[_-]?key|계좌|account_number" .\src\skills\openbell-guard\scripts .\src\skills\openbell-guard\SKILL.md .\src\tests\test_run_openbell_cli.py` 결과는 실제 비밀값이 아니라 보안 정규식 정의, SKILL 금지 설명, 테스트용 seeded synthetic secret 문자열만 잡았습니다.
+- `logs/` 파일은 수동 편집하지 않았습니다.
+
+**트러블슈팅**
+
+- T-009: 구간 밖 로그 fixture의 `event_time`만 바꾸고 `observed_time`을 함께 바꾸지 않아 선택 필드 오류가 하나 더 발생했습니다. fixture의 `observed_time`을 `event_time` 이후로 맞춰 해결했습니다.
+
+**결과**
+
+- P4-07이 완료됐습니다. 이제 OpenBell Guard는 마스킹된 로그·메트릭 파일을 행 단위로 검증하고, 다음 지표 계산 단계가 사용할 수 있는 M-014 레코드 요약을 생성합니다.
+- 새로운 중요한 범위·아키텍처 결정은 없어 Decisionlog 새 항목은 만들지 않았습니다.
+- 현재 단계는 Phase 4의 P4-07/19이며, P4-06 민감정보 차단 다음의 행 단위 파서 단계입니다.
+- 남은 태스크는 P4-08~P4-19 약 12단계이며, 예상 작업량은 높음입니다.
+- 다음 단계는 P4-08 서비스 경로 정규화와 60초 버킷 기반 구조 준비입니다.
+- Notion 동기화 완료: Phase 4에 W-044 요약을 추가했고, fetch로 Phase 4 본문에 W-044 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+- Git 동기화 대기: W-044 산출물과 기록을 커밋·push해야 합니다.

@@ -1,6 +1,7 @@
 """OpenBell Guard command-line entry point.
 
-P4-06 implements the shared CLI, bundle preflight gate, and first sanitizer:
+P4-07 implements the shared CLI, bundle preflight gate, sanitizer, and
+line-oriented telemetry parser:
 
 - parse ``--bundle`` and ``--output``;
 - verify that the bundle is an existing, non-symlink directory;
@@ -9,15 +10,17 @@ P4-06 implements the shared CLI, bundle preflight gate, and first sanitizer:
 - verify UTF-8/UTF-8-BOM readability;
 - validate the ``incident.json`` contract and optional ``service-map.json``.
 - create a masked working copy and ``sanitization-report.md``.
+- parse sanitized ``logs.jsonl`` and ``metrics.csv`` rows into a record summary.
 
-It still does not parse telemetry records, compute metrics, or create the final
-``analysis.json``. Those behaviors belong to later Phase 4 steps and must keep
-using this entry point.
+It still does not compute metrics or create the final ``analysis.json``. Those
+behaviors belong to later Phase 4 steps and must keep using this entry point.
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import json
 import math
 import re
@@ -36,10 +39,11 @@ EXIT_CODES = {
     "output_validation_error": 5,
 }
 
-CLI_STAGE = "P4-06"
+CLI_STAGE = "P4-07"
 SUMMARY_FILENAME = "openbell-cli-summary.json"
 SANITIZED_BUNDLE_DIR = "sanitized-bundle"
 SANITIZATION_REPORT = "sanitization-report.md"
+RECORD_SUMMARY_FILENAME = "record-summary.json"
 SCHEMA_VERSION = "1.0"
 CONTRACT_VERSION = "1.0.0"
 
@@ -52,7 +56,39 @@ FILE_BYTE_LIMITS = {
     "metrics.csv": 20 * MIB,
 }
 BUNDLE_BYTE_LIMIT = 80 * MIB
+LOG_RECORD_LIMIT = 100_000
+METRIC_RECORD_LIMIT = 50_000
+JSONL_RECORD_BYTE_LIMIT = 1 * MIB
 INCIDENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+LOG_REQUIRED_FIELDS = frozenset({"event_time", "service_name", "service_path", "status"})
+LOG_OPTIONAL_FIELDS = frozenset(
+    {
+        "observed_time",
+        "latency_ms",
+        "dependency_type",
+        "trace_id",
+        "log_type",
+        "severity",
+        "message",
+    }
+)
+LOG_ALLOWED_FIELDS = LOG_REQUIRED_FIELDS | LOG_OPTIONAL_FIELDS
+LOG_STATUS_VALUES = frozenset({"ok", "error", "timeout", "rejected"})
+LOG_SEVERITY_VALUES = frozenset({"debug", "info", "warning", "error", "critical"})
+CSV_REQUIRED_COLUMNS = ("timestamp", "service_name", "metric_name", "value", "unit")
+CSV_OPTIONAL_COLUMNS = ("service_path", "dependency_type")
+CSV_ALLOWED_COLUMNS = frozenset(CSV_REQUIRED_COLUMNS + CSV_OPTIONAL_COLUMNS)
+METRIC_UNIT_BY_NAME = {
+    "request_count": "count",
+    "error_count": "count",
+    "latency_sample_ms": "ms",
+    "ingestion_lag_sample_ms": "ms",
+    "cpu_utilization_pct": "percent",
+    "memory_utilization_pct": "percent",
+}
+COUNT_METRIC_NAMES = frozenset({"request_count", "error_count"})
+NONNEGATIVE_SAMPLE_METRIC_NAMES = frozenset({"latency_sample_ms", "ingestion_lag_sample_ms"})
+PERCENT_METRIC_NAMES = frozenset({"cpu_utilization_pct", "memory_utilization_pct"})
 STANDARD_SERVICE_PATHS = frozenset(
     {
         "auth_access",
@@ -129,9 +165,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="run_openbell.py",
         description=(
-            "Prepare an OpenBell Guard run directory. P4-06 validates the CLI, "
+            "Prepare an OpenBell Guard run directory. P4-07 validates the CLI, "
             "paths, bundle file contract, byte limits, incident metadata, and "
-            "creates a masked working copy; telemetry analysis is implemented later."
+            "creates a masked working copy plus a telemetry record summary; "
+            "metric calculation is implemented later."
         ),
     )
     parser.add_argument(
@@ -461,6 +498,14 @@ def validate_incident(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, d
         {
             "incident_id": incident_id,
             "timezone": timezone,
+            "baseline_window": {
+                "start": baseline_start.isoformat(),
+                "end": baseline_end.isoformat(),
+            },
+            "incident_window": {
+                "start": incident_start.isoformat(),
+                "end": incident_end.isoformat(),
+            },
             "baseline_window_seconds": baseline_seconds,
             "incident_window_seconds": incident_seconds,
             "threshold_service_paths": sorted(thresholds),
@@ -482,6 +527,8 @@ def validate_service_map(payload: dict[str, Any]) -> tuple[dict[str, Any] | None
 
     seen_names: set[str] = set()
     dependency_refs: list[tuple[str, str]] = []
+    service_path_by_name: dict[str, str] = {}
+    dependency_type_by_name: dict[str, str] = {}
     for service in services:
         if not isinstance(service, dict):
             return None, issue_payload(
@@ -528,6 +575,8 @@ def validate_service_map(payload: dict[str, Any]) -> tuple[dict[str, Any] | None
                 argument="bundle",
                 source_file="service-map.json",
             )
+        service_path_by_name[service_name] = str(service_path)
+        dependency_type_by_name[service_name] = str(dependency_type)
         dependencies = service.get("dependencies", [])
         if not isinstance(dependencies, list) or not all(isinstance(item, str) for item in dependencies):
             return None, issue_payload(
@@ -549,7 +598,15 @@ def validate_service_map(payload: dict[str, Any]) -> tuple[dict[str, Any] | None
                 source_file="service-map.json",
             )
 
-    return {"provided": True, "service_count": len(services)}, None
+    return (
+        {
+            "provided": True,
+            "service_count": len(services),
+            "service_path_by_name": service_path_by_name,
+            "dependency_type_by_name": dependency_type_by_name,
+        },
+        None,
+    )
 
 
 def validate_bundle_preflight(
@@ -773,7 +830,7 @@ def render_sanitization_report(summary: dict[str, Any]) -> str:
 
 def sanitize_bundle(
     *, decoded_files: dict[str, str], output_path: Path
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+) -> tuple[dict[str, Any] | None, dict[str, str] | None, dict[str, Any] | None]:
     try:
         sanitized_files: dict[str, str] = {}
         findings: list[dict[str, Any]] = []
@@ -787,7 +844,7 @@ def sanitize_bundle(
             residues.extend(find_sensitive_matches(sanitized_text, source_file=file_name, include_redacted=False))
         if residues:
             first_residue = residues[0]
-            return None, issue_payload(
+            return None, None, issue_payload(
                 exit_code=EXIT_CODES["security_block"],
                 issue_code="SEC002_SENSITIVE_RESIDUE",
                 message="Sensitive pattern residue remained after masking.",
@@ -803,14 +860,703 @@ def sanitize_bundle(
         summary = summarize_sanitization(findings)
         (output_path / SANITIZATION_REPORT).write_text(render_sanitization_report(summary), encoding="utf-8")
     except OSError:
-        return None, issue_payload(
+        return None, None, issue_payload(
             exit_code=EXIT_CODES["security_block"],
             issue_code="SEC001_SANITIZER_FAILURE",
             message="The sanitizer could not create the masked working copy or report.",
             argument="output",
         )
 
+    return summary, sanitized_files, None
+
+
+def empty_record_counts() -> dict[str, int]:
+    return {
+        "physical_record_count": 0,
+        "accepted_record_count": 0,
+        "rejected_record_count": 0,
+        "outside_analysis_window_count": 0,
+        "field_dropped_count": 0,
+    }
+
+
+def add_record_counts(target: dict[str, int], source: dict[str, int]) -> None:
+    for key, value in source.items():
+        target[key] += value
+
+
+def record_issue(
+    *,
+    issue_code: str,
+    source_file: str,
+    location: str,
+    message: str,
+    field: str | None = None,
+    severity: str = "warning",
+) -> dict[str, Any]:
+    issue: dict[str, Any] = {
+        "issue_code": issue_code,
+        "severity": severity,
+        "source_file": source_file,
+        "source_location": location,
+        "message": message,
+    }
+    if field is not None:
+        issue["field"] = field
+    return issue
+
+
+def parse_row_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed
+
+
+def is_finite_number(value: Any) -> bool:
+    return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(float(value))
+
+
+def is_valid_trimmed_string(value: Any, *, max_length: int) -> bool:
+    return isinstance(value, str) and 1 <= len(value.strip()) <= max_length
+
+
+def is_in_analysis_window(timestamp: datetime, incident_summary: dict[str, Any]) -> bool:
+    baseline_window = incident_summary["baseline_window"]
+    incident_window = incident_summary["incident_window"]
+    baseline_start = parse_row_datetime(baseline_window["start"])
+    baseline_end = parse_row_datetime(baseline_window["end"])
+    incident_start = parse_row_datetime(incident_window["start"])
+    incident_end = parse_row_datetime(incident_window["end"])
+    assert baseline_start is not None
+    assert baseline_end is not None
+    assert incident_start is not None
+    assert incident_end is not None
+    return (baseline_start <= timestamp < baseline_end) or (incident_start <= timestamp < incident_end)
+
+
+def parse_logs_jsonl(text: str, incident_summary: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    counts = empty_record_counts()
+    issues: list[dict[str, Any]] = []
+    accepted_in_window_count = 0
+
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        counts["physical_record_count"] += 1
+        if counts["physical_record_count"] > LOG_RECORD_LIMIT:
+            return None, issue_payload(
+                exit_code=EXIT_CODES["limit_exceeded"],
+                issue_code="LIM002_RECORD_COUNT",
+                message="logs.jsonl exceeds its supported record count.",
+                argument="bundle",
+                source_file="logs.jsonl",
+            )
+        if len(line.encode("utf-8")) > JSONL_RECORD_BYTE_LIMIT:
+            return None, issue_payload(
+                exit_code=EXIT_CODES["limit_exceeded"],
+                issue_code="LIM003_RECORD_BYTES",
+                message="A logs.jsonl record exceeds its supported byte limit.",
+                argument="bundle",
+                source_file=f"logs.jsonl:L{line_number}",
+            )
+
+        location = f"logs.jsonl:L{line_number}"
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            counts["rejected_record_count"] += 1
+            issues.append(
+                record_issue(
+                    issue_code="REC001_SYNTAX",
+                    source_file="logs.jsonl",
+                    location=location,
+                    message="The JSONL row is not valid JSON.",
+                    severity="degraded",
+                )
+            )
+            continue
+        if not isinstance(payload, dict):
+            counts["rejected_record_count"] += 1
+            issues.append(
+                record_issue(
+                    issue_code="REC001_SYNTAX",
+                    source_file="logs.jsonl",
+                    location=location,
+                    message="The JSONL row must be an object.",
+                    severity="degraded",
+                )
+            )
+            continue
+
+        missing_required = sorted(field for field in LOG_REQUIRED_FIELDS if field not in payload)
+        if missing_required:
+            counts["rejected_record_count"] += 1
+            issues.append(
+                record_issue(
+                    issue_code="REC002_REQUIRED_FIELD",
+                    source_file="logs.jsonl",
+                    location=location,
+                    field=missing_required[0],
+                    message="A required logs.jsonl field is missing.",
+                    severity="degraded",
+                )
+            )
+            continue
+
+        event_time = parse_row_datetime(payload.get("event_time"))
+        if event_time is None:
+            counts["rejected_record_count"] += 1
+            issues.append(
+                record_issue(
+                    issue_code="REC003_TYPE",
+                    source_file="logs.jsonl",
+                    location=location,
+                    field="event_time",
+                    message="event_time must be an ISO 8601 timestamp with an explicit offset.",
+                    severity="degraded",
+                )
+            )
+            continue
+        if not is_valid_trimmed_string(payload.get("service_name"), max_length=128):
+            counts["rejected_record_count"] += 1
+            issues.append(
+                record_issue(
+                    issue_code="REC003_TYPE",
+                    source_file="logs.jsonl",
+                    location=location,
+                    field="service_name",
+                    message="service_name must be a non-empty string up to 128 characters after trimming.",
+                    severity="degraded",
+                )
+            )
+            continue
+        if payload.get("service_path") not in STANDARD_SERVICE_PATHS:
+            counts["rejected_record_count"] += 1
+            issues.append(
+                record_issue(
+                    issue_code="REC004_ENUM",
+                    source_file="logs.jsonl",
+                    location=location,
+                    field="service_path",
+                    message="service_path must be one of the standard service path codes.",
+                    severity="degraded",
+                )
+            )
+            continue
+        if payload.get("status") not in LOG_STATUS_VALUES:
+            counts["rejected_record_count"] += 1
+            issues.append(
+                record_issue(
+                    issue_code="REC004_ENUM",
+                    source_file="logs.jsonl",
+                    location=location,
+                    field="status",
+                    message="status must be ok, error, timeout, or rejected.",
+                    severity="degraded",
+                )
+            )
+            continue
+
+        counts["accepted_record_count"] += 1
+
+        for field in sorted(set(payload) - LOG_ALLOWED_FIELDS):
+            issues.append(
+                record_issue(
+                    issue_code="WRN001_UNKNOWN_FIELD",
+                    source_file="logs.jsonl",
+                    location=location,
+                    field=field,
+                    message="An unknown logs.jsonl field was ignored.",
+                )
+            )
+
+        observed_time = payload.get("observed_time")
+        if observed_time is not None:
+            parsed_observed_time = parse_row_datetime(observed_time)
+            if parsed_observed_time is None or parsed_observed_time < event_time:
+                counts["field_dropped_count"] += 1
+                issues.append(
+                    record_issue(
+                        issue_code="FLD001_OPTIONAL_DROPPED",
+                        source_file="logs.jsonl",
+                        location=location,
+                        field="observed_time",
+                        message="observed_time was present but invalid, so the field was dropped.",
+                        severity="degraded",
+                    )
+                )
+
+        latency_ms = payload.get("latency_ms")
+        if latency_ms is not None and (not is_finite_number(latency_ms) or float(latency_ms) < 0):
+            counts["field_dropped_count"] += 1
+            issues.append(
+                record_issue(
+                    issue_code="FLD001_OPTIONAL_DROPPED",
+                    source_file="logs.jsonl",
+                    location=location,
+                    field="latency_ms",
+                    message="latency_ms was present but invalid, so the field was dropped.",
+                    severity="degraded",
+                )
+            )
+
+        dependency_type = payload.get("dependency_type")
+        if dependency_type is not None and dependency_type not in STANDARD_DEPENDENCY_TYPES:
+            counts["field_dropped_count"] += 1
+            issues.append(
+                record_issue(
+                    issue_code="FLD001_OPTIONAL_DROPPED",
+                    source_file="logs.jsonl",
+                    location=location,
+                    field="dependency_type",
+                    message="dependency_type was present but invalid, so the field was dropped.",
+                    severity="degraded",
+                )
+            )
+
+        for field, max_length in (("trace_id", 128), ("log_type", 64)):
+            if field in payload and payload[field] is not None and not is_valid_trimmed_string(
+                payload[field], max_length=max_length
+            ):
+                counts["field_dropped_count"] += 1
+                issues.append(
+                    record_issue(
+                        issue_code="FLD001_OPTIONAL_DROPPED",
+                        source_file="logs.jsonl",
+                        location=location,
+                        field=field,
+                        message=f"{field} was present but invalid, so the field was dropped.",
+                        severity="degraded",
+                    )
+                )
+
+        severity = payload.get("severity")
+        if severity is not None and severity not in LOG_SEVERITY_VALUES:
+            counts["field_dropped_count"] += 1
+            issues.append(
+                record_issue(
+                    issue_code="FLD001_OPTIONAL_DROPPED",
+                    source_file="logs.jsonl",
+                    location=location,
+                    field="severity",
+                    message="severity was present but invalid, so the field was dropped.",
+                    severity="degraded",
+                )
+            )
+
+        message = payload.get("message")
+        if message is not None and not isinstance(message, str):
+            counts["field_dropped_count"] += 1
+            issues.append(
+                record_issue(
+                    issue_code="FLD001_OPTIONAL_DROPPED",
+                    source_file="logs.jsonl",
+                    location=location,
+                    field="message",
+                    message="message was present but invalid, so the field was dropped.",
+                    severity="degraded",
+                )
+            )
+
+        if is_in_analysis_window(event_time, incident_summary):
+            accepted_in_window_count += 1
+        else:
+            counts["outside_analysis_window_count"] += 1
+            issues.append(
+                record_issue(
+                    issue_code="TIM001_OUTSIDE_WINDOW",
+                    source_file="logs.jsonl",
+                    location=location,
+                    field="event_time",
+                    message="The accepted row is outside both analysis windows and was excluded from aggregation.",
+                )
+            )
+
+    return {
+        "counts": counts,
+        "issues": issues,
+        "accepted_in_window_count": accepted_in_window_count,
+    }, None
+
+
+def parse_metric_number(value: Any) -> float | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = float(value)
+    except ValueError:
+        return None
+    if not math.isfinite(parsed):
+        return None
+    return parsed
+
+
+def is_integer_value(value: float) -> bool:
+    return value >= 0 and value.is_integer()
+
+
+def csv_header_issue(message: str) -> dict[str, Any]:
+    return issue_payload(
+        exit_code=EXIT_CODES["input_error"],
+        issue_code="INP005_SCHEMA",
+        message=message,
+        argument="bundle",
+        source_file="metrics.csv",
+    )
+
+
+def parse_metrics_csv(
+    text: str, incident_summary: dict[str, Any], service_map_summary: dict[str, Any]
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    counts = empty_record_counts()
+    issues: list[dict[str, Any]] = []
+    accepted_in_window_count = 0
+
+    stream = io.StringIO(text)
+    reader = csv.DictReader(stream, strict=True)
+    fieldnames = reader.fieldnames
+    if not fieldnames:
+        return None, csv_header_issue("metrics.csv must include a header row.")
+    if len(fieldnames) != len(set(fieldnames)):
+        return None, csv_header_issue("metrics.csv header names must be unique.")
+    for column in CSV_REQUIRED_COLUMNS:
+        if column not in fieldnames:
+            return None, csv_header_issue("metrics.csv is missing a required column.")
+
+    for column in sorted(set(fieldnames) - CSV_ALLOWED_COLUMNS):
+        issues.append(
+            record_issue(
+                issue_code="WRN001_UNKNOWN_FIELD",
+                source_file="metrics.csv",
+                location="metrics.csv:R0",
+                field=column,
+                message="An unknown metrics.csv column was ignored.",
+            )
+        )
+
+    service_path_by_name = service_map_summary.get("service_path_by_name", {})
+    if not isinstance(service_path_by_name, dict):
+        service_path_by_name = {}
+
+    try:
+        for row_number, row in enumerate(reader, start=1):
+            counts["physical_record_count"] += 1
+            if counts["physical_record_count"] > METRIC_RECORD_LIMIT:
+                return None, issue_payload(
+                    exit_code=EXIT_CODES["limit_exceeded"],
+                    issue_code="LIM002_RECORD_COUNT",
+                    message="metrics.csv exceeds its supported record count.",
+                    argument="bundle",
+                    source_file="metrics.csv",
+                )
+
+            location = f"metrics.csv:R{row_number}"
+            if None in row:
+                counts["rejected_record_count"] += 1
+                issues.append(
+                    record_issue(
+                        issue_code="REC001_SYNTAX",
+                        source_file="metrics.csv",
+                        location=location,
+                        message="The CSV row has more columns than the header.",
+                        severity="degraded",
+                    )
+                )
+                continue
+
+            missing_required = [
+                column for column in CSV_REQUIRED_COLUMNS if row.get(column) is None or row.get(column) == ""
+            ]
+            if missing_required:
+                counts["rejected_record_count"] += 1
+                issues.append(
+                    record_issue(
+                        issue_code="REC002_REQUIRED_FIELD",
+                        source_file="metrics.csv",
+                        location=location,
+                        field=missing_required[0],
+                        message="A required metrics.csv field is missing.",
+                        severity="degraded",
+                    )
+                )
+                continue
+
+            timestamp = parse_row_datetime(row.get("timestamp"))
+            if timestamp is None:
+                counts["rejected_record_count"] += 1
+                issues.append(
+                    record_issue(
+                        issue_code="REC003_TYPE",
+                        source_file="metrics.csv",
+                        location=location,
+                        field="timestamp",
+                        message="timestamp must be an ISO 8601 timestamp with an explicit offset.",
+                        severity="degraded",
+                    )
+                )
+                continue
+            service_name = row.get("service_name")
+            if not is_valid_trimmed_string(service_name, max_length=128):
+                counts["rejected_record_count"] += 1
+                issues.append(
+                    record_issue(
+                        issue_code="REC003_TYPE",
+                        source_file="metrics.csv",
+                        location=location,
+                        field="service_name",
+                        message="service_name must be a non-empty string up to 128 characters after trimming.",
+                        severity="degraded",
+                    )
+                )
+                continue
+            assert isinstance(service_name, str)
+            service_name = service_name.strip()
+
+            service_path = (row.get("service_path") or "").strip()
+            if not service_path:
+                mapped_service_path = service_path_by_name.get(service_name)
+                service_path = mapped_service_path if isinstance(mapped_service_path, str) else ""
+            if service_path not in STANDARD_SERVICE_PATHS:
+                counts["rejected_record_count"] += 1
+                issues.append(
+                    record_issue(
+                        issue_code="REC004_ENUM",
+                        source_file="metrics.csv",
+                        location=location,
+                        field="service_path",
+                        message="service_path must be present directly or resolvable from service-map.json.",
+                        severity="degraded",
+                    )
+                )
+                continue
+
+            metric_name = row.get("metric_name")
+            unit = row.get("unit")
+            if metric_name not in METRIC_UNIT_BY_NAME or unit != METRIC_UNIT_BY_NAME.get(str(metric_name)):
+                counts["rejected_record_count"] += 1
+                issues.append(
+                    record_issue(
+                        issue_code="REC004_ENUM",
+                        source_file="metrics.csv",
+                        location=location,
+                        field="metric_name",
+                        message="metric_name and unit must match the standard metric table.",
+                        severity="degraded",
+                    )
+                )
+                continue
+
+            value = parse_metric_number(row.get("value"))
+            if value is None:
+                counts["rejected_record_count"] += 1
+                issues.append(
+                    record_issue(
+                        issue_code="REC005_RANGE",
+                        source_file="metrics.csv",
+                        location=location,
+                        field="value",
+                        message="value must be a finite number.",
+                        severity="degraded",
+                    )
+                )
+                continue
+            if metric_name in COUNT_METRIC_NAMES:
+                if not is_integer_value(value) or timestamp.second != 0 or timestamp.microsecond != 0:
+                    counts["rejected_record_count"] += 1
+                    issues.append(
+                        record_issue(
+                            issue_code="REC005_RANGE",
+                            source_file="metrics.csv",
+                            location=location,
+                            field="value",
+                            message="request_count and error_count must be non-negative integers on minute boundaries.",
+                            severity="degraded",
+                        )
+                    )
+                    continue
+            elif metric_name in NONNEGATIVE_SAMPLE_METRIC_NAMES:
+                if value < 0:
+                    counts["rejected_record_count"] += 1
+                    issues.append(
+                        record_issue(
+                            issue_code="REC005_RANGE",
+                            source_file="metrics.csv",
+                            location=location,
+                            field="value",
+                            message="Latency and ingestion lag metric values must be non-negative.",
+                            severity="degraded",
+                        )
+                    )
+                    continue
+            elif metric_name in PERCENT_METRIC_NAMES and (value < 0 or value > 100):
+                counts["rejected_record_count"] += 1
+                issues.append(
+                    record_issue(
+                        issue_code="REC005_RANGE",
+                        source_file="metrics.csv",
+                        location=location,
+                        field="value",
+                        message="CPU and memory percent metric values must be between 0 and 100 inclusive.",
+                        severity="degraded",
+                    )
+                )
+                continue
+
+            dependency_type = row.get("dependency_type")
+            if dependency_type:
+                dependency_type = dependency_type.strip()
+                if dependency_type not in STANDARD_DEPENDENCY_TYPES:
+                    counts["field_dropped_count"] += 1
+                    issues.append(
+                        record_issue(
+                            issue_code="FLD001_OPTIONAL_DROPPED",
+                            source_file="metrics.csv",
+                            location=location,
+                            field="dependency_type",
+                            message="dependency_type was present but invalid, so the field was dropped.",
+                            severity="degraded",
+                        )
+                    )
+
+            counts["accepted_record_count"] += 1
+            if is_in_analysis_window(timestamp, incident_summary):
+                accepted_in_window_count += 1
+            else:
+                counts["outside_analysis_window_count"] += 1
+                issues.append(
+                    record_issue(
+                        issue_code="TIM001_OUTSIDE_WINDOW",
+                        source_file="metrics.csv",
+                        location=location,
+                        field="timestamp",
+                        message="The accepted row is outside both analysis windows and was excluded from aggregation.",
+                    )
+                )
+    except csv.Error:
+        counts["rejected_record_count"] += 1
+        issues.append(
+            record_issue(
+                issue_code="REC001_SYNTAX",
+                source_file="metrics.csv",
+                location=f"metrics.csv:R{counts['physical_record_count'] + 1}",
+                message="The CSV parser could not read a row.",
+                severity="degraded",
+            )
+        )
+
+    return {
+        "counts": counts,
+        "issues": issues,
+        "accepted_in_window_count": accepted_in_window_count,
+    }, None
+
+
+def summarize_issues(issues: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for issue in issues:
+        issue_code = str(issue["issue_code"])
+        counts[issue_code] = counts.get(issue_code, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def build_record_summary(
+    *,
+    logs_result: dict[str, Any] | None,
+    metrics_result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    total_counts = empty_record_counts()
+    by_source: dict[str, dict[str, int]] = {}
+    all_issues: list[dict[str, Any]] = []
+    logs_in_window = 0
+    metrics_in_window = 0
+
+    if logs_result is not None:
+        by_source["logs.jsonl"] = logs_result["counts"]
+        add_record_counts(total_counts, logs_result["counts"])
+        all_issues.extend(logs_result["issues"])
+        logs_in_window = int(logs_result["accepted_in_window_count"])
+    if metrics_result is not None:
+        by_source["metrics.csv"] = metrics_result["counts"]
+        add_record_counts(total_counts, metrics_result["counts"])
+        all_issues.extend(metrics_result["issues"])
+        metrics_in_window = int(metrics_result["accepted_in_window_count"])
+
+    if logs_in_window > 0:
+        primary_telemetry = "logs.jsonl"
+    elif metrics_in_window > 0:
+        primary_telemetry = "metrics.csv"
+    else:
+        primary_telemetry = None
+
+    degraded_issue_prefixes = ("REC", "FLD", "MET")
+    degraded = any(str(issue["issue_code"]).startswith(degraded_issue_prefixes) for issue in all_issues)
+    return {
+        "schema_version": "0.1",
+        "stage": CLI_STAGE,
+        "status": "degraded" if degraded else "success",
+        "primary_telemetry": primary_telemetry,
+        "record_counts": {
+            "m_id": "M-014",
+            "total": total_counts,
+            "by_source": by_source,
+        },
+        "accepted_in_window": {
+            "total": logs_in_window + metrics_in_window,
+            "logs.jsonl": logs_in_window,
+            "metrics.csv": metrics_in_window,
+        },
+        "issue_counts": summarize_issues(all_issues),
+        "issues": all_issues,
+        "raw_excerpts_emitted": False,
+    }
+
+
+def parse_telemetry_records(
+    *, sanitized_files: dict[str, str], preflight_summary: dict[str, Any]
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    incident_summary = preflight_summary["incident"]
+    service_map_summary = preflight_summary["service_map"]
+
+    logs_result = None
+    metrics_result = None
+    if "logs.jsonl" in sanitized_files:
+        logs_result, issue = parse_logs_jsonl(sanitized_files["logs.jsonl"], incident_summary)
+        if issue is not None:
+            return None, issue
+    if "metrics.csv" in sanitized_files:
+        metrics_result, issue = parse_metrics_csv(sanitized_files["metrics.csv"], incident_summary, service_map_summary)
+        if issue is not None:
+            return None, issue
+
+    summary = build_record_summary(logs_result=logs_result, metrics_result=metrics_result)
+    if int(summary["accepted_in_window"]["total"]) == 0:
+        return None, issue_payload(
+            exit_code=EXIT_CODES["input_error"],
+            issue_code="INP008_NO_VALID_RECORD",
+            message="No valid telemetry records remain inside the baseline or incident windows.",
+            argument="bundle",
+        )
     return summary, None
+
+
+def write_record_summary(*, output_path: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        (output_path / RECORD_SUMMARY_FILENAME).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        return issue_payload(
+            exit_code=EXIT_CODES["output_validation_error"],
+            issue_code="CLI014_RECORD_SUMMARY_WRITE_FAILED",
+            message="The record summary file could not be written.",
+            argument="output",
+        )
+    return None
 
 
 def path_overlaps_bundle(*, bundle_path: Path, output_path: Path) -> bool:
@@ -853,28 +1599,43 @@ def validate_and_prepare_output(*, bundle_path: Path, output_path: Path) -> dict
 
 
 def success_payload(
-    *, bundle_path: Path, preflight_summary: dict[str, Any], sanitization_summary: dict[str, Any]
+    *,
+    bundle_path: Path,
+    preflight_summary: dict[str, Any],
+    sanitization_summary: dict[str, Any],
+    record_summary: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "schema_version": "0.1",
         "stage": CLI_STAGE,
-        "run_status": "sanitized_preflight_ready",
+        "run_status": "records_parsed_ready",
         "exit_code": EXIT_CODES["ok"],
         "bundle": {
             "name": bundle_path.name,
             "path_kind": "directory",
             "preflight": preflight_summary,
             "raw_telemetry_records_parsed": False,
+            "sanitized_telemetry_records_parsed": True,
             "raw_excerpts_emitted": False,
         },
         "outputs": {
             "summary_file": SUMMARY_FILENAME,
             "sanitized_bundle_dir": SANITIZED_BUNDLE_DIR,
+            "record_summary_file": RECORD_SUMMARY_FILENAME,
+            "record_summary_created": True,
             "analysis_json_created": False,
             "sanitization_report_created": True,
             "sanitization_report_file": SANITIZATION_REPORT,
         },
         "sanitization": sanitization_summary,
+        "telemetry": {
+            "parse_status": record_summary["status"],
+            "primary_telemetry": record_summary["primary_telemetry"],
+            "record_counts": record_summary["record_counts"],
+            "accepted_in_window": record_summary["accepted_in_window"],
+            "issue_counts": record_summary["issue_counts"],
+            "raw_excerpts_emitted": False,
+        },
         "implemented_scope": [
             "parse --bundle and --output",
             "validate bundle directory existence",
@@ -888,9 +1649,11 @@ def success_payload(
             "write masked working copy",
             "write sanitization-report.md without raw values",
             "rescan masked working copy for sensitive residue",
+            "parse sanitized logs.jsonl rows",
+            "parse sanitized metrics.csv rows",
+            "write M-014 record-summary.json without raw excerpts",
         ],
         "deferred_scope": [
-            "telemetry record parsing",
             "metric calculation",
             "analysis.json generation",
         ],
@@ -935,16 +1698,32 @@ def run(bundle_arg: str, output_arg: str) -> int:
         write_stderr_json(issue)
         return int(issue["exit_code"])
 
-    sanitization_summary, issue = sanitize_bundle(decoded_files=decoded_files, output_path=output_path)
+    sanitization_summary, sanitized_files, issue = sanitize_bundle(decoded_files=decoded_files, output_path=output_path)
     if issue is not None:
         write_stderr_json(issue)
         return int(issue["exit_code"])
     assert sanitization_summary is not None
+    assert sanitized_files is not None
+
+    record_summary, issue = parse_telemetry_records(
+        sanitized_files=sanitized_files,
+        preflight_summary=preflight_summary,
+    )
+    if issue is not None:
+        write_stderr_json(issue)
+        return int(issue["exit_code"])
+    assert record_summary is not None
+
+    issue = write_record_summary(output_path=output_path, payload=record_summary)
+    if issue is not None:
+        write_stderr_json(issue)
+        return int(issue["exit_code"])
 
     payload = success_payload(
         bundle_path=bundle_path,
         preflight_summary=preflight_summary,
         sanitization_summary=sanitization_summary,
+        record_summary=record_summary,
     )
     issue = write_summary(output_path=output_path, payload=payload)
     if issue is not None:

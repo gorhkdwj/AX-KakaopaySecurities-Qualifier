@@ -286,3 +286,32 @@
 
 - 보안 정규식처럼 복잡하고 제품 코드와 일치해야 하는 검증은 셸에서 패턴을 다시 작성하지 않고, 구현 함수 또는 공용 helper를 재사용합니다.
 - PowerShell에서 긴 정규식 묶음을 직접 조합해야 하는 상황은 피하고, 필요한 경우 짧은 Python 검증 스크립트로 분리해 먼저 컴파일 가능성을 확인합니다.
+
+### T-009 · 구간 밖 로그 fixture의 `observed_time` 정합성 누락
+
+**발생 단계**
+
+- Phase/P4 단계: Phase 4 / P4-07 행 단위 파서
+- 관련 W-ID: W-044
+
+**증상**
+
+- P4-07 구현 후 `python -m unittest .\src\tests\test_run_openbell_cli.py -v` 실행에서 `test_logs_parser_reports_m014_counts_and_row_level_issues`가 실패했습니다.
+- 테스트는 `field_dropped_count=1`을 기대했지만 실제 결과는 `field_dropped_count=2`였습니다.
+
+**확인한 원인**
+
+- 구간 밖 행을 만들기 위해 `event_time`만 `2026-06-30T09:03:00+09:00`로 바꿨고, 기본 `observed_time`은 `2026-06-30T09:00:06+09:00`로 남겨 두었습니다.
+- 계약상 `observed_time >= event_time`이어야 하므로, 해당 구간 밖 행이 의도와 달리 선택 필드 오류도 함께 발생시켰습니다.
+- 제품 코드 오류가 아니라 테스트 fixture의 시간 필드 정합성 누락이었습니다.
+
+**조치**
+
+- 구간 밖 행의 `observed_time`을 `2026-06-30T09:03:01+09:00`로 함께 조정했습니다.
+- 같은 구간 밖 행을 사용하는 `INP008_NO_VALID_RECORD` 테스트도 같은 방식으로 수정했습니다.
+- 수정 후 P4-07 CLI 테스트 19개와 전체 unittest 31개가 모두 통과했습니다.
+
+**재발 방지·후속 조치**
+
+- 시간 관련 테스트 fixture에서 `event_time`을 바꿀 때는 `observed_time`과 분석 구간 포함 여부를 함께 확인합니다.
+- 행 단위 파서 테스트는 하나의 행에 여러 오류가 섞이지 않도록, 의도한 issue code 외의 선택 필드 오류가 발생하지 않는지 기대 카운트로 검증합니다.

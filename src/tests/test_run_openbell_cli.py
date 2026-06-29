@@ -1,8 +1,8 @@
-"""CLI and bundle-preflight tests for OpenBell Guard.
+"""CLI, bundle-preflight, sanitizer, and row-parser tests for OpenBell Guard.
 
-P4-05 keeps the shared command-line entry point and adds the first bundle
-preflight gate. The script still must not analyze telemetry records or create
-the final analysis outputs.
+P4-07 keeps the shared command-line entry point and adds line-level parsing for
+sanitized logs and metrics. The script still must not calculate metrics or
+create the final analysis outputs.
 """
 
 from __future__ import annotations
@@ -92,6 +92,63 @@ def write_minimal_logs(bundle_path: Path) -> None:
     (bundle_path / "logs.jsonl").write_text("{}\n", encoding="utf-8")
 
 
+def write_logs(bundle_path: Path, rows: list[dict]) -> None:
+    (bundle_path / "logs.jsonl").write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+
+def valid_log_row(**overrides: object) -> dict:
+    row = {
+        "event_time": "2026-06-30T09:00:05+09:00",
+        "observed_time": "2026-06-30T09:00:06+09:00",
+        "service_name": "quote-api",
+        "service_path": "market_data",
+        "dependency_type": "exchange",
+        "status": "ok",
+        "latency_ms": 100,
+        "trace_id": "trace-temp",
+        "log_type": "request",
+        "severity": "info",
+        "message": "synthetic request completed",
+    }
+    row.update(overrides)
+    return row
+
+
+def write_metrics(bundle_path: Path, rows: list[dict], fieldnames: list[str] | None = None) -> None:
+    fieldnames = fieldnames or [
+        "timestamp",
+        "service_name",
+        "service_path",
+        "dependency_type",
+        "metric_name",
+        "value",
+        "unit",
+    ]
+    lines = [",".join(fieldnames)]
+    for row in rows:
+        lines.append(",".join(str(row.get(field, "")) for field in fieldnames))
+    (bundle_path / "metrics.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_valid_service_map(bundle_path: Path) -> None:
+    write_json(
+        bundle_path / "service-map.json",
+        {
+            "services": [
+                {
+                    "service_name": "quote-api",
+                    "service_path": "market_data",
+                    "dependency_type": "exchange",
+                    "dependencies": [],
+                }
+            ]
+        },
+    )
+
+
 def write_seeded_secret_logs(bundle_path: Path) -> None:
     message = (
         "-----BEGIN PRIVATE KEY-----\\nPRIVATEKEYLINE\\n-----END PRIVATE KEY----- "
@@ -102,8 +159,8 @@ def write_seeded_secret_logs(bundle_path: Path) -> None:
         "010-1234-5678 "
         "account_no: 123-456-789012"
     )
-    row = {"message": message}
-    (bundle_path / "logs.jsonl").write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+    row = valid_log_row(message=message)
+    write_logs(bundle_path, [row])
 
 
 class RunOpenBellCliTest(unittest.TestCase):
@@ -130,16 +187,23 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertTrue(summary_path.exists())
 
             payload = json.loads(summary_path.read_text(encoding="utf-8"))
-            self.assertEqual("P4-06", payload["stage"])
-            self.assertEqual("sanitized_preflight_ready", payload["run_status"])
+            self.assertEqual("P4-07", payload["stage"])
+            self.assertEqual("records_parsed_ready", payload["run_status"])
             self.assertFalse(payload["bundle"]["raw_telemetry_records_parsed"])
+            self.assertTrue(payload["bundle"]["sanitized_telemetry_records_parsed"])
             self.assertFalse(payload["bundle"]["raw_excerpts_emitted"])
             self.assertFalse(payload["outputs"]["analysis_json_created"])
             self.assertTrue(payload["outputs"]["sanitization_report_created"])
+            self.assertTrue(payload["outputs"]["record_summary_created"])
             self.assertEqual("domestic-market-open-min", payload["bundle"]["preflight"]["incident"]["incident_id"])
             self.assertEqual(4, len(payload["bundle"]["preflight"]["files"]))
             self.assertTrue((output_path / "sanitized-bundle" / "logs.jsonl").exists())
             self.assertTrue((output_path / "sanitization-report.md").exists())
+            self.assertTrue((output_path / "record-summary.json").exists())
+            self.assertEqual("logs.jsonl", payload["telemetry"]["primary_telemetry"])
+            self.assertEqual(9, payload["telemetry"]["record_counts"]["total"]["physical_record_count"])
+            self.assertEqual(9, payload["telemetry"]["record_counts"]["total"]["accepted_record_count"])
+            self.assertEqual(0, payload["telemetry"]["record_counts"]["total"]["rejected_record_count"])
 
             serialized = json.dumps(payload, ensure_ascii=False)
             self.assertNotIn(str(FIXTURE_BUNDLE), serialized)
@@ -314,7 +378,7 @@ class SanitizationTest(unittest.TestCase):
             self.assertEqual(original_logs, (bundle_path / "logs.jsonl").read_text(encoding="utf-8"))
 
             summary = json.loads((output_path / "openbell-cli-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-06", summary["stage"])
+            self.assertEqual("P4-07", summary["stage"])
             self.assertTrue(summary["outputs"]["sanitization_report_created"])
             self.assertFalse(summary["outputs"]["analysis_json_created"])
             self.assertEqual(7, summary["sanitization"]["total_redactions"])
@@ -356,6 +420,128 @@ class SanitizationTest(unittest.TestCase):
         module = load_run_openbell_module()
         matches = module.find_sensitive_matches("api_key=[REDACTED:SECRET]", include_redacted=False)
         self.assertEqual([], matches)
+
+
+class RowParserTest(unittest.TestCase):
+    def test_logs_parser_reports_m014_counts_and_row_level_issues(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            output_path = Path(temp_dir) / "out"
+            bundle_path.mkdir()
+            write_valid_incident(bundle_path)
+            invalid_required = valid_log_row()
+            invalid_required.pop("status")
+            write_logs(
+                bundle_path,
+                [
+                    valid_log_row(extra_debug="ignored"),
+                    valid_log_row(
+                        event_time="2026-06-30T09:03:00+09:00",
+                        observed_time="2026-06-30T09:03:01+09:00",
+                    ),
+                    valid_log_row(latency_ms=-1),
+                    invalid_required,
+                ],
+            )
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(output_path))
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            record_summary = json.loads((output_path / "record-summary.json").read_text(encoding="utf-8"))
+            counts = record_summary["record_counts"]["by_source"]["logs.jsonl"]
+            self.assertEqual(4, counts["physical_record_count"])
+            self.assertEqual(3, counts["accepted_record_count"])
+            self.assertEqual(1, counts["rejected_record_count"])
+            self.assertEqual(1, counts["outside_analysis_window_count"])
+            self.assertEqual(1, counts["field_dropped_count"])
+            self.assertEqual("degraded", record_summary["status"])
+            self.assertEqual("logs.jsonl", record_summary["primary_telemetry"])
+            self.assertEqual(2, record_summary["accepted_in_window"]["logs.jsonl"])
+            self.assertEqual(1, record_summary["issue_counts"]["REC002_REQUIRED_FIELD"])
+            self.assertEqual(1, record_summary["issue_counts"]["FLD001_OPTIONAL_DROPPED"])
+            self.assertEqual(1, record_summary["issue_counts"]["TIM001_OUTSIDE_WINDOW"])
+            self.assertEqual(1, record_summary["issue_counts"]["WRN001_UNKNOWN_FIELD"])
+            self.assertEqual(
+                4,
+                counts["accepted_record_count"] + counts["rejected_record_count"],
+            )
+
+    def test_metrics_parser_uses_service_map_for_missing_service_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            output_path = Path(temp_dir) / "out"
+            bundle_path.mkdir()
+            write_valid_incident(bundle_path)
+            write_valid_service_map(bundle_path)
+            write_metrics(
+                bundle_path,
+                [
+                    {
+                        "timestamp": "2026-06-30T09:00:00+09:00",
+                        "service_name": "quote-api",
+                        "metric_name": "request_count",
+                        "value": "3",
+                        "unit": "count",
+                    }
+                ],
+            )
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(output_path))
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            record_summary = json.loads((output_path / "record-summary.json").read_text(encoding="utf-8"))
+            counts = record_summary["record_counts"]["by_source"]["metrics.csv"]
+            self.assertEqual(1, counts["physical_record_count"])
+            self.assertEqual(1, counts["accepted_record_count"])
+            self.assertEqual(0, counts["rejected_record_count"])
+            self.assertEqual("metrics.csv", record_summary["primary_telemetry"])
+
+    def test_parser_returns_inp008_when_no_valid_in_window_record_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            output_path = Path(temp_dir) / "out"
+            bundle_path.mkdir()
+            write_valid_incident(bundle_path)
+            write_logs(
+                bundle_path,
+                [
+                    valid_log_row(
+                        event_time="2026-06-30T09:03:00+09:00",
+                        observed_time="2026-06-30T09:03:01+09:00",
+                    )
+                ],
+            )
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(output_path))
+
+            self.assertEqual(2, completed.returncode)
+            self.assertIn("INP008_NO_VALID_RECORD", completed.stderr)
+            self.assertFalse((output_path / "openbell-cli-summary.json").exists())
+            self.assertFalse((output_path / "record-summary.json").exists())
+
+    def test_metrics_header_schema_error_is_fatal_inp005(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            output_path = Path(temp_dir) / "out"
+            bundle_path.mkdir()
+            write_valid_incident(bundle_path)
+            write_metrics(
+                bundle_path,
+                [
+                    {
+                        "timestamp": "2026-06-30T09:00:00+09:00",
+                        "service_name": "quote-api",
+                        "metric_name": "request_count",
+                        "value": "3",
+                    }
+                ],
+                fieldnames=["timestamp", "service_name", "metric_name", "value"],
+            )
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(output_path))
+
+            self.assertEqual(2, completed.returncode)
+            self.assertIn("INP005_SCHEMA", completed.stderr)
 
 
 if __name__ == "__main__":
