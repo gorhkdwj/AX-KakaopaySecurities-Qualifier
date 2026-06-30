@@ -2976,3 +2976,44 @@
 - 최종 답변에서 해당 영문 문단의 자연스러운 한글 번역, 근거 시간대·지표, 사용자 해석 방법, 권장 조치 순서를 설명합니다.
 - 중요한 새 결정은 없으므로 Decisionlog는 추가하지 않았습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-067 요약을 추가했고 페이지 갱신 시각으로 반영 여부를 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+
+### W-068 · out 산출물과 Git 추적 예제 문서의 분리 기준 검토
+
+**요청**
+
+- `out/` 폴더의 case-001, case-002를 플러그인 사용 예제로 해설·해석 가이드와 함께 Markdown 파일로 Git에 올리는 것이 좋지 않은지 검토합니다.
+- 이를 굳이 로컬에만 남기는 이유를 설명합니다.
+
+**수행 작업**
+
+- `docs/manual-test-reports/`의 기존 case-001, case-002 Markdown 보고서가 Git 추적 대상인지 확인했습니다.
+- `.gitignore`에서 `out/`이 무시 대상임을 확인했습니다.
+- `out/manual-tests/`의 대용량 원본·결과 산출물 구성을 확인했습니다.
+- 원본 실행 산출물과 사람이 읽는 예제 문서를 분리하는 기준을 정리했습니다.
+
+**변경 파일**
+
+- 수정: `Worklog.md`
+
+**검증**
+
+- `git ls-files docs/manual-test-reports`
+  - `README.md`, `case-001-market-open-watchlist-review.md`, `case-002-large-scenario.md`, `human-review-template.md`가 Git 추적 대상임을 확인했습니다.
+- `.gitignore`
+  - `out/`이 Git 무시 대상으로 설정되어 있음을 확인했습니다.
+- `git status --short --ignored`
+  - `out/`은 ignored 상태로 남아 있음을 확인했습니다.
+- `out/manual-tests`
+  - case-002의 원본 `logs.jsonl`, sanitized `logs.jsonl`, `metrics.csv`, 분석 JSON 등이 대용량 실행 산출물임을 확인했습니다.
+
+**판단 근거**
+
+- `out/` 전체는 재생성 가능한 실행 산출물, 대용량 로그, 마스킹 전·후 데이터, 내부 검증 JSON을 포함하므로 Git에 그대로 올리기에는 저장소 크기·보안·노이즈 위험이 큽니다.
+- 반면 case-001, case-002의 목적, 실행 명령, 주요 결과, 해석 가이드는 포트폴리오·심사자 검토에 유용하므로 `docs/manual-test-reports/`에 Markdown으로 추적하는 것이 적절합니다.
+- 이 기준은 D-036의 `out/manual-tests`와 `docs/manual-test-reports` 분리 결정과 일치합니다.
+
+**결과**
+
+- 최종 답변에서 `out/` 전체는 로컬 유지, 해설·해석 가이드 Markdown은 Git 추적 문서로 보강하는 방향을 권장합니다.
+- 중요한 새 결정은 D-036 범위에 포함되므로 Decisionlog는 추가하지 않았습니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-068 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
