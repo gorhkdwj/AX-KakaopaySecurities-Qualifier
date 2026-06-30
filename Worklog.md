@@ -2524,4 +2524,45 @@
 - P4-14~P4-18 제출 전 검토 보고서 초안 작성이 완료됐습니다.
 - 중요한 새 아키텍처·보안·데이터 처리 결정은 없으므로 Decisionlog 항목은 만들지 않았습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-058 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+- Git 동기화 완료: P4-14~P4-18 통합 검토 보고서와 W-058 기록을 커밋 `1179767f57e1171ec74edb768a121d4bb8e8ff19`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋 `165dd29`로 원격에 반영했습니다.
+
+### W-059 · 검증 산출물 보존·삭제 상태 확인
+
+**요청**
+
+- 검증에 사용된 로그, Markdown 파일 등이 테스트만 하고 삭제됐는지 확인합니다.
+
+**수행 작업**
+
+- `git status --short --ignored`로 Git 추적·무시 상태를 확인했습니다.
+- `out/` 하위 smoke·benchmark 산출물 디렉터리 존재 여부를 확인했습니다.
+- `git ls-files`로 재현용 fixture와 P4-17·P4-18·P4-14~P4-18 검토 문서가 Git에 포함되어 있는지 확인했습니다.
+- `logs/` 폴더의 현재 상태를 확인했습니다.
+
+**변경 파일**
+
+- 수정: `Worklog.md`
+
+**검증**
+
+- `out/`은 `.gitignore` 대상이며 로컬에는 `p4-04-smoke`부터 `p4-18-final-smoke`, `p4-18-benchmark` 등 검증 산출물이 남아 있음을 확인했습니다.
+- `src/tests/fixtures/domestic-market-open-min/bundle/logs.jsonl` 등 재현용 fixture는 Git에 포함되어 있음을 확인했습니다.
+- `docs/p4-17-scenario-matrix.md`, `docs/p4-18-benchmark-report.md`, `docs/p4-14-to-p4-18-review-report.md`는 Git에 포함되어 있음을 확인했습니다.
+- 단위 테스트 중 `tempfile.TemporaryDirectory()`로 생성된 A~H 임시 번들은 테스트 종료 시 자동 삭제되는 구조입니다.
+- `logs/`는 Git 무시 대상이며, 현재 `logs/codex` 폴더가 존재합니다. 수동 편집·삭제는 하지 않았습니다.
+
+**판단 근거**
+
+- 제출 재현에 필요한 최소 fixture와 검토용 문서는 저장소에 남겨야 합니다.
+- 실제 실행으로 생성된 smoke·benchmark 산출물은 용량이 크고 재생성 가능하므로 `out/`에 로컬 보존하되 Git에는 포함하지 않는 것이 적절합니다.
+- 원본 대화 로그 성격의 `logs/`는 제출에는 필요하지만 GitHub에 올리지 않는 정책을 유지합니다.
+
+**결과**
+
+- 테스트 중 임시 생성된 일부 데이터는 자동 삭제됐습니다.
+- 재현용 fixture와 검토용 Markdown 문서는 삭제하지 않고 Git에 남겼습니다.
+- smoke·benchmark 실행 산출물은 삭제하지 않고 로컬 `out/`에 남아 있지만, Git에는 올라가지 않습니다.
+- 대화 로그 `logs/`는 삭제하거나 편집하지 않았고 Git에도 올라가지 않습니다.
+- 중요한 새 결정은 없으므로 Decisionlog 항목은 만들지 않았습니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-059 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
 - Git 동기화는 커밋과 원격 push 후 완료 문구를 반영 예정입니다.
