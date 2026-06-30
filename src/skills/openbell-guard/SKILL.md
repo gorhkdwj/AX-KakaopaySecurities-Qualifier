@@ -7,7 +7,7 @@ description: Analyze a synthetic or anonymized post-incident brokerage bundle fo
 
 OpenBell Guard는 카카오페이증권 AX 해커톤 제출물을 위한 Codex Skill입니다.
 
-현재 구현 상태는 Phase 4의 P4-17 통합 시나리오 검증 단계입니다. 플러그인 구조, 지표 계약 복사본, 최소 합성 fixture, `run_openbell.py --bundle --output` 실행 입구, 독립 출력 검증기 `validate_bundle.py --output`, `analysis.json` 기반 `openbell-report.md` 보고서 초안 생성 흐름, 그리고 A~H 합성 시나리오 통합 테스트가 있습니다.
+현재 구현 상태는 Phase 4의 P4-18 성능·회귀 benchmark 단계입니다. 플러그인 구조, 지표 계약 복사본, 최소 합성 fixture, `run_openbell.py --bundle --output` 실행 입구, 독립 출력 검증기 `validate_bundle.py --output`, `analysis.json` 기반 `openbell-report.md` 보고서 초안 생성 흐름, A~H 합성 시나리오 통합 테스트, 그리고 `benchmark_openbell.py` 기반 M-016·M-017 benchmark가 있습니다.
 
 ## 현재 사용 가능한 범위
 
@@ -23,6 +23,7 @@ OpenBell Guard는 카카오페이증권 AX 해커톤 제출물을 위한 Codex S
 - CLI는 중간 산출물을 병합해 최종 기계 검증용 `analysis.json`을 생성합니다.
 - CLI는 검증 가능한 `analysis.json`만 사용해 사람용 Markdown 초안인 `openbell-report.md`를 생성합니다. 이 초안은 원본 로그를 다시 읽지 않습니다.
 - CLI는 `analysis.json` 구조, evidence 참조, confirmed_fact 근거, 보고서 claim marker, 민감정보 잔존 여부를 자체 검증해 `output-validation.json`을 생성합니다.
+- benchmark CLI는 합성 지원 한도 번들을 생성하고 1회 준비 실행 후 5회 측정 실행으로 M-016 실행시간 중앙값과 M-017 Python 추적 메모리 최고값을 기록합니다.
 
 ## 실행 예시
 
@@ -34,6 +35,12 @@ python src/skills/openbell-guard/scripts/run_openbell.py --bundle src/tests/fixt
 
 ```bash
 python src/skills/openbell-guard/scripts/validate_bundle.py --output out/domestic-market-open-min
+```
+
+지원 한도 합성 benchmark를 실행하려면 다음 명령을 사용합니다.
+
+```bash
+python src/skills/openbell-guard/scripts/benchmark_openbell.py --output out/p4-18-benchmark
 ```
 
 성공하면 다음 파일과 폴더가 생성됩니다.
@@ -50,7 +57,8 @@ python src/skills/openbell-guard/scripts/validate_bundle.py --output out/domesti
 - `openbell-report.md`
 - `output-validation.json`
 
-`analysis.json`은 P4-17 기준 최종 기계 검증용 원장이며, `openbell-report.md`는 이 원장을 사람이 읽기 쉽게 옮긴 검토용 초안입니다. `output-validation.json`은 원장, 보고서 claim marker와 산출물의 자체 검증 결과입니다.
+`analysis.json`은 P4-18 기준 최종 기계 검증용 원장이며, `openbell-report.md`는 이 원장을 사람이 읽기 쉽게 옮긴 검토용 초안입니다. `output-validation.json`은 원장, 보고서 claim marker와 산출물의 자체 검증 결과입니다.
+`benchmark-summary.json`과 `benchmark-report.md`는 P4-18 기준 로컬 합성 benchmark 결과이며, 운영환경 성능 보장을 의미하지 않습니다.
 
 ## 기본 지표 계산 기준
 
@@ -81,6 +89,14 @@ python src/skills/openbell-guard/scripts/validate_bundle.py --output out/domesti
 - M-015 `cpu_utilization_median_pct`, `memory_utilization_median_pct`: `metrics.csv`의 CPU·메모리 percent 표본을 서비스 경로 × 60초 버킷별 중앙값으로 계산합니다.
 - CPU·메모리 표본은 로그 존재 여부와 관계없이 `context_metrics`에 보존합니다.
 - CPU·메모리 값은 맥락 근거로만 사용하며, 높은 수치만으로 자원 포화나 근본 원인을 확정하지 않습니다.
+
+## P4-18 benchmark 기준
+
+- M-016 `deterministic_pipeline_wall_time_seconds`: `run_openbell.py`의 결정론적 로컬 파이프라인을 같은 프로세스 조건에서 5회 측정한 실행시간 중앙값입니다.
+- M-017 `peak_python_memory_mib`: 같은 측정 구간에서 Python 표준 라이브러리 `tracemalloc`으로 추적한 최고 Python 할당 메모리입니다.
+- 기본 benchmark 입력은 `logs.jsonl` 100,000행, `metrics.csv` 50,000행의 합성 지원 한도 번들입니다.
+- 통과 기준은 5회 모두 exit 0, M-016 중앙값 60초 이하, M-017 최고값 512 MiB 이하입니다.
+- 이 값은 로컬 합성 benchmark 결과이며 운영환경 처리 성능, 전체 프로세스 메모리, OS 파일 캐시 또는 native memory를 보장하지 않습니다.
 
 ## 상태 판정 기준
 
@@ -131,4 +147,4 @@ python src/skills/openbell-guard/scripts/validate_bundle.py --output out/domesti
 
 ## 다음 구현 예정 범위
 
-다음 단계에서는 실행시간·Python 추적 메모리 benchmark와 제출 패키징 검증을 순차적으로 구현합니다.
+다음 단계에서는 설치·호출·제출 패키징 검증을 구현합니다.

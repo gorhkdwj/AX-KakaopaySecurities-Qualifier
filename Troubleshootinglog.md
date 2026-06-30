@@ -559,3 +559,40 @@
 - issue code를 새로 기대할 때는 기억이나 자연어 이름으로 쓰지 말고 `run_openbell.py`, 지표 계약, 기존 테스트 중 하나에서 실제 문자열을 확인합니다.
 - 경계·한도 시나리오의 기대값은 exit code와 issue code를 함께 검증합니다.
 - 한글 경로가 포함된 patch는 가능한 한 프로젝트 루트 기준 상대경로를 사용합니다.
+
+### T-018 · 지원 한도 benchmark 첫 시도가 도구 시간 제한 전에 summary를 쓰지 못한 문제
+
+**발생 단계**
+
+- Phase/P4 단계: Phase 4 / P4-18 성능·회귀 benchmark
+- 관련 W-ID: W-056
+
+**증상**
+
+- `python .\src\skills\openbell-guard\scripts\benchmark_openbell.py --output .\out\p4-18-benchmark` 첫 실행이 180초 도구 호출 제한을 넘겨 종료됐습니다.
+- 종료 시점에는 `benchmark-summary.json`이 아직 생성되지 않았습니다.
+- 부분 산출물을 확인하니 warm-up과 여러 측정 run 출력은 생성됐지만 마지막 summary 작성까지 도달하지 못했습니다.
+- 대규모 run 출력에서 `bucket-summary.json`, `metric-summary.json`, `state-summary.json`, `analysis.json`이 수 MB까지 커졌습니다.
+
+**확인한 원인**
+
+- 첫 직접 원인은 benchmark 전체가 1회 warm-up과 5회 측정 run을 한 번에 수행해 단일 도구 호출 시간이 길어진 것입니다.
+- 더 중요한 병목은 aggregate 산출물의 `source_locations`가 모든 행 번호를 그대로 JSON 배열에 저장한 점이었습니다.
+- 지원 한도 입력에서는 10개 버킷이어도 각 버킷이 수천~수만 개 행 위치를 들고 있어 산출물 작성과 output validation 비용이 커졌습니다.
+- M-016 단일 run 기준 자체가 60초를 넘었다는 증거는 아니었습니다. 각 run 생성 시각을 보면 개별 run은 대략 37~40초 범위였습니다.
+
+**조치**
+
+- `compact_source_location_list()`를 추가해 산출물의 `source_locations`를 파일별 행 범위 요약으로 압축했습니다.
+- `build_bucket_summary`, context metrics, bucket metrics, metric issue 위치 출력에 압축을 적용했습니다.
+- benchmark CLI의 상대 출력 경로는 OS별 구분자 차이를 줄이기 위해 `runs/run-001` 같은 POSIX 형식으로 기록하도록 조정했습니다.
+- 기본 benchmark를 다시 실행해 M-016 중앙값 34.523738초, M-017 최고값 194.280592MiB로 통과함을 확인했습니다.
+- `docs/p4-18-benchmark-report.md`에 첫 시도 timeout, 출력 경량화 조치와 최종 측정 결과를 기록했습니다.
+
+**재발 방지·후속 조치**
+
+- aggregate 산출물에는 대규모 raw 위치 목록을 그대로 저장하지 말고 요약 범위, count, evidence ID를 우선 사용합니다.
+- benchmark나 회귀 검증처럼 전체 실행시간이 긴 작업은 단일 run 기준과 전체 호출 기준을 구분해 해석합니다.
+- M-016은 개별 deterministic pipeline run의 중앙값이고, 전체 benchmark 명령 wall time이 아님을 보고서와 최종 설명에서 구분합니다.
+- 대규모 입력으로 새 산출물을 추가할 때는 결과 파일 크기도 검증 항목에 포함합니다.
+- `tracemalloc` 결과는 Python 추적 메모리일 뿐 전체 프로세스 메모리가 아니므로 과장하지 않습니다.

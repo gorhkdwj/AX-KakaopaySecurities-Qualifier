@@ -2373,3 +2373,75 @@
 - 다음 단계는 P4-18 benchmark입니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-055 요약을 추가하고 D-034 하위 페이지를 생성했으며, D-034 fetch와 Phase 4 검색으로 반영을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이고 D-034 URL은 `https://app.notion.com/p/38f05ea68bfc81918247f116dc0fc601`입니다.
 - Git 동기화 완료: P4-17 산출물과 W-055/D-034/T-017 기록을 커밋 `bc43baefa85334acad9b3df5012bf1d76773360e`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영합니다.
+
+### W-056 · Phase 4 P4-18 성능·회귀 benchmark
+
+**요청**
+
+- 다음 단계 구현을 진행합니다. 현재 순서상 P4-18 성능 benchmark M-016~M-017을 수행합니다.
+
+**수행 작업**
+
+- `src/skills/openbell-guard/scripts/benchmark_openbell.py`를 추가해 합성 지원 한도 번들을 생성하고 1회 warm-up 후 5회 측정 run으로 M-016·M-017을 계산하도록 했습니다.
+- 기본 benchmark 입력은 `logs.jsonl` 100,000행, `metrics.csv` 50,000행이며 실제 고객·계좌·비밀정보를 포함하지 않는 합성 데이터입니다.
+- benchmark summary에는 측정 환경, 지원 한도, 각 run의 exit code, 실행시간, Python 추적 peak memory, 통과 여부와 한계를 기록합니다.
+- `source_locations` 전체 행 번호 목록이 대규모 입력에서 산출물을 수 MB로 부풀리는 병목을 확인하고, 산출물에는 파일별 행 범위 요약을 기록하도록 `compact_source_location_list()`를 추가했습니다.
+- `run_openbell.py`, `validate_bundle.py`, `SKILL.md`, 기존 CLI 테스트의 stage를 P4-18로 갱신했습니다.
+- `src/tests/test_benchmark_openbell.py`를 추가해 작은 benchmark 성공, threshold 실패, 지원 한도 초과 인자 거부를 검증했습니다.
+- `docs/p4-18-benchmark-report.md`를 추가하고 `docs/README.md`에 연결했습니다.
+
+**변경 파일**
+
+- 추가: `src/skills/openbell-guard/scripts/benchmark_openbell.py`
+- 추가: `src/tests/test_benchmark_openbell.py`
+- 추가: `docs/p4-18-benchmark-report.md`
+- 수정: `src/skills/openbell-guard/scripts/run_openbell.py`
+- 수정: `src/skills/openbell-guard/scripts/validate_bundle.py`
+- 수정: `src/skills/openbell-guard/SKILL.md`
+- 수정: `src/tests/test_run_openbell_cli.py`
+- 수정: `docs/README.md`
+- 수정: `Worklog.md`
+- 수정 예정: `Decisionlog.md`, `Troubleshootinglog.md`
+
+**검증**
+
+- `python -m unittest .\src\tests\test_benchmark_openbell.py -v`를 실행해 benchmark 테스트 3개가 통과했습니다.
+- `python -m unittest .\src\tests\test_run_openbell_cli.py -v`를 실행해 CLI 테스트 44개가 통과했습니다.
+- `python .\src\skills\openbell-guard\scripts\benchmark_openbell.py --output .\out\p4-18-benchmark`를 실행해 기본 지원 한도 benchmark가 통과했습니다.
+  - 측정 run 5회 모두 exit code 0입니다.
+  - M-016 중앙값은 34.523738초로 기준 60초 이하입니다.
+  - M-017 최고값은 194.280592MiB로 기준 512MiB 이하입니다.
+- `python -m py_compile .\src\skills\openbell-guard\scripts\run_openbell.py .\src\skills\openbell-guard\scripts\validate_bundle.py .\src\skills\openbell-guard\scripts\benchmark_openbell.py .\src\tests\test_run_openbell_cli.py .\src\tests\test_integration_scenarios.py .\src\tests\test_benchmark_openbell.py`가 통과했습니다.
+- `python .\tools\preflight_check.py --quiet` 결과 `SUMMARY ok=5 warn=0 error=0`을 확인했습니다.
+- `python $env:USERPROFILE\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src`가 `Plugin validation passed`로 통과했습니다.
+- `python -X utf8 $env:USERPROFILE\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard`가 `Skill is valid!`로 통과했습니다.
+- `python -m unittest discover .\src\tests -v`를 실행해 전체 테스트 68개가 통과했습니다.
+- `python .\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\src\tests\fixtures\domestic-market-open-min\bundle --output .\out\p4-18-final-smoke`를 실행해 exit 0, `stage=P4-18`, `run_status=report_validated`, `report_claim_refs=passed`를 확인했습니다.
+- `python .\src\skills\openbell-guard\scripts\validate_bundle.py --output .\out\p4-18-final-smoke`를 실행해 exit 0, `stage=P4-18`, `status=passed`, 모든 output validation check 통과를 확인했습니다.
+- `python .\src\skills\openbell-guard\scripts\benchmark_openbell.py --output .\out\p4-18-fast-check --log-records 120 --metric-records 60 --runs 1 --warmup-runs 0`을 실행해 상대 출력 경로가 `runs/run-001` 형식으로 기록되는 것을 확인했습니다.
+- `logs/` 파일은 수동 편집하지 않았습니다.
+
+**트러블슈팅**
+
+- T-018에 기록했습니다.
+- 첫 기본 benchmark 시도는 도구 호출 제한 180초를 넘겨 summary 작성 전 종료됐습니다.
+- 점검 결과 개별 run은 대략 37~40초 범위였지만, 1회 warm-up과 5회 측정 run을 한 번에 수행하면서 전체 호출 시간이 길어졌습니다.
+- 동시에 `source_locations` 전체 행 번호 목록이 `bucket-summary.json`, `metric-summary.json`, `state-summary.json`, `analysis.json`을 수 MB까지 부풀리는 병목을 확인했습니다.
+- `source_locations`를 파일별 행 범위 요약으로 압축한 뒤 기본 benchmark가 통과했고, 대표 출력 크기는 `analysis.json` 약 44KB, `bucket-summary.json` 약 4.7KB로 줄었습니다.
+
+**판단 근거**
+
+- P4-18의 목적은 운영 성능 보장이 아니라 합성 지원 한도 입력에서 현재 MVP 한도가 로컬에서 안전한지 확인하는 것입니다.
+- benchmark를 `run_openbell.py` 내부에 섞지 않고 별도 CLI로 분리하면 기존 분석 산출물 구조를 흔들지 않으면서 M-016·M-017을 재현할 수 있습니다.
+- 전체 행 번호 목록은 대규모 입력에서 근거 추적성보다 저장·검증 비용을 크게 키우므로, aggregate 산출물에는 행 범위 요약이 더 적합합니다.
+- `tracemalloc`은 Python 추적 메모리만 측정하므로 보고서에 native memory와 OS 파일 캐시를 포함하지 않는다는 한계를 명시했습니다.
+
+**결과**
+
+- P4-18은 완료됐습니다.
+- 관련 결정: D-035 `P4-18 benchmark는 별도 CLI로 분리하고 source_locations는 행 범위 요약으로 압축`
+- 관련 트러블슈팅: T-018 `지원 한도 benchmark 첫 시도가 도구 시간 제한 전에 summary를 쓰지 못한 문제`
+- 현재 단계는 Phase 4의 P4-18/19이며, 남은 Phase 4 작업은 P4-19 설치·호출·제출 패키징 검증 1단계입니다.
+- 남은 예상 작업량은 중간입니다. 플러그인 설치·호출 확인, 제출 ZIP 구조 검사, README·질문지·logs 정합성 확인이 필요합니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-056 요약을 추가하고 D-035 하위 페이지를 생성했으며, D-035 fetch와 Phase 4 검색으로 반영을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이고 D-035 URL은 `https://app.notion.com/p/38f05ea68bfc8114a5acdaa67c8ce513`입니다.
+- Git 동기화는 1차 커밋과 원격 push 후 완료 커밋으로 반영 예정입니다.

@@ -1,6 +1,6 @@
 """OpenBell Guard command-line entry point.
 
-P4-17 implements the shared CLI, bundle preflight gate, sanitizer,
+P4-18 implements the shared CLI, bundle preflight gate, sanitizer,
 line-oriented telemetry parser, 60-second bucket preparation, basic bucket
 metrics, observability lag metrics, baseline-vs-incident comparisons,
 threshold-based state judgment with context metrics, evidence-backed claims,
@@ -62,7 +62,7 @@ EXIT_CODES = {
     "output_validation_error": 5,
 }
 
-CLI_STAGE = "P4-17"
+CLI_STAGE = "P4-18"
 SUMMARY_FILENAME = "openbell-cli-summary.json"
 ANALYSIS_FILENAME = "analysis.json"
 REPORT_FILENAME = "openbell-report.md"
@@ -246,7 +246,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="run_openbell.py",
         description=(
-            "Prepare an OpenBell Guard run directory. P4-17 validates the CLI, "
+            "Prepare an OpenBell Guard run directory. P4-18 validates the CLI, "
             "paths, bundle file contract, byte limits, incident metadata, and "
             "creates a masked working copy, telemetry record summary, bucket summary, "
             "metric summary, threshold-based state summary, evidence summary, "
@@ -1573,6 +1573,31 @@ def compact_source_locations(locations: list[str]) -> str:
     return ",".join(sorted(locations))
 
 
+def compact_source_location_list(locations: list[str]) -> list[str]:
+    if not locations:
+        return []
+
+    grouped_numbers: dict[tuple[str, str], list[int]] = {}
+    fallback_locations: list[str] = []
+    for location in sorted(locations):
+        match = re.match(r"^(?P<file>[^:]+):(?P<prefix>[LR])(?P<number>\d+)$", location)
+        if match is None:
+            fallback_locations.append(location)
+            continue
+        key = (match.group("file"), match.group("prefix"))
+        grouped_numbers.setdefault(key, []).append(int(match.group("number")))
+
+    compacted: list[str] = []
+    for file_name, prefix in sorted(grouped_numbers):
+        numbers = sorted(set(grouped_numbers[(file_name, prefix)]))
+        if len(numbers) == 1:
+            compacted.append(f"{file_name}:{prefix}{numbers[0]}")
+        else:
+            compacted.append(f"{file_name}:{prefix}{numbers[0]}-{prefix}{numbers[-1]}")
+    compacted.extend(fallback_locations)
+    return sorted(compacted)
+
+
 def source_file_from_locations(locations: list[str]) -> str:
     if not locations:
         return "unknown"
@@ -2622,7 +2647,7 @@ def build_bucket_summary(
 
     buckets = [bucket_groups[key] for key in sorted(bucket_groups)]
     for bucket in buckets:
-        bucket["source_locations"] = sorted(bucket["source_locations"])
+        bucket["source_locations"] = compact_source_location_list(bucket["source_locations"])
 
     return {
         "schema_version": "0.1",
@@ -2687,7 +2712,7 @@ def build_context_metrics(
                 "bucket_start_utc": group["bucket_start_utc"],
                 "bucket_start_local": group["bucket_start_local"],
                 "source_for_m015": group["source_for_m015"],
-                "source_locations": sorted(group["source_locations"]),
+                "source_locations": compact_source_location_list(group["source_locations"]),
                 "metrics": {
                     "cpu_utilization_median_pct": context_metric_value(
                         value=median_value(cpu_samples),
@@ -2794,7 +2819,7 @@ def build_metric_summary(
                     "issue_code": "MET001_COUNT_INCONSISTENT",
                     "severity": "degraded",
                     "source_file": "metrics.csv",
-                    "source_locations": sorted(group["source_locations"]),
+                    "source_locations": compact_source_location_list(group["source_locations"]),
                     "service_path": group["service_path"],
                     "bucket_start_utc": group["bucket_start_utc"],
                     "message": "The metrics.csv bucket has error_count greater than request_count, so request/error aggregation was invalidated.",
@@ -2852,7 +2877,7 @@ def build_metric_summary(
                 "bucket_start_local": group["bucket_start_local"],
                 "source_for_m001_m007": group["source_for_m001_m007"],
                 "source_for_m008_m009": group["source_for_m008_m009"],
-                "source_locations": sorted(group["source_locations"]),
+                "source_locations": compact_source_location_list(group["source_locations"]),
                 "metrics": {
                     "request_count": metric_value(
                         m_id="M-001",
@@ -4117,7 +4142,6 @@ def success_payload(
             "write output-validation.json without raw excerpts",
         ],
         "deferred_scope": [
-            "M-016 through M-017 pipeline benchmark metric calculation",
             "AI-assisted narrative polishing beyond deterministic report draft",
         ],
         "exit_code_skeleton": EXIT_CODES,
