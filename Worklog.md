@@ -3915,3 +3915,35 @@
 
 - 프로젝트 프로세스 평가는 대화 답변으로 제공했습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-085 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+
+### W-086 · 프로젝트 진행 구조 총정리
+
+**요청**
+
+- 프로젝트가 진행된 전체 구조를 파일 구조, 판단 과정, `AGENTS.md`, `Decisionlog.md`, `Worklog.md` 등 주요 Markdown 파일의 설립·관리 방식 중심으로 총정리했습니다.
+
+**수행 작업**
+
+- 루트 디렉터리, `src/`, `docs/`, `tools/`의 현재 구조를 확인했습니다.
+- `AGENTS.md`, `Worklog.md`, `Decisionlog.md`, `Troubleshootinglog.md`, `README.md`의 주요 역할과 관리 방식을 확인했습니다.
+- 작업 기록 W-ID, 결정 기록 D-ID, 트러블슈팅 T-ID의 누적 상태를 확인하고 프로젝트 진행 구조를 설명했습니다.
+
+**변경 파일**
+
+- `Worklog.md`
+
+**검증**
+
+- `rg --files -g '!logs/**' -g '!out/**' -g '!submission/**'`로 추적 가능한 주요 파일 구조를 확인했습니다.
+- 기록 현황 확인: `Worklog.md` W-001~W-085, `Decisionlog.md` D-001~D-040, `Troubleshootinglog.md` T-000~T-027 범위의 기록이 존재합니다.
+- 이번 요청은 기존 구조를 설명하는 작업이므로 `Decisionlog.md`에는 새 항목을 추가하지 않았습니다.
+
+**판단 근거**
+
+- 이번 프로젝트는 루트 운영 문서, `docs/` 기획·학습·검증 문서, `src/` 제출용 플러그인 루트, `tools/` 개발 보조 도구, `logs/` 원본 대화 로그, `submission.zip` 제출 패키지를 분리해 운영했습니다.
+- 주요 판단은 Decisionlog에, 실제 작업 이력은 Worklog에, 재발 가능한 문제와 해결은 Troubleshootinglog에 분리해 기록했습니다.
+
+**결과**
+
+- 프로젝트 진행 구조 총정리는 대화 답변으로 제공했습니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-086 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
