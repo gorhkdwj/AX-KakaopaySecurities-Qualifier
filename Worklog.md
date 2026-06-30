@@ -3515,3 +3515,37 @@
 - 제출용 `submission.zip`은 README·Skill·manifest 수정사항을 반영한 상태로 재생성됐고 구조·실행·출력 검증이 모두 통과했습니다.
 - 새 Codex 앱 UI의 클릭 기반 신뢰 승인 확인은 여전히 수동 확인 후보로 남습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-077 요약을 추가하고, D-040 결정 페이지를 생성했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이며 D-040 URL은 `https://app.notion.com/p/38f05ea68bfc81458581f64d0f3a5edc`입니다.
+
+### W-078 · 플러그인 멘션 URI 호출 가능 여부 설명
+
+**요청**
+
+- `[@openbell-guard](plugin://openbell-guard@openbell-guard-local)` 형태가 플러그인 호출을 의미하는지 확인하되, 실제 실행은 하지 않습니다.
+
+**수행 작업**
+
+- 실제 플러그인 실행, Skill 호출, CLI 실행은 하지 않았습니다.
+- 해당 URI가 설치된 `openbell-guard` 플러그인을 가리키는 멘션 링크이며, 대화에서 해당 플러그인을 명시적으로 참조하는 방식임을 설명했습니다.
+
+**변경 파일**
+
+- 수정: `Worklog.md`
+
+**검증**
+
+- 도구 실행 검증은 수행하지 않았습니다. 사용자의 요청 범위가 “호출 가능 여부만 확인하고 실행하지 말 것”이었기 때문입니다.
+
+**트러블슈팅**
+
+- 새 오류는 없었습니다.
+
+**판단 근거**
+
+- `plugin://openbell-guard@openbell-guard-local`은 직전 P4-19 보강 검증에서 설치 확인한 `openbell-guard@openbell-guard-local` 플러그인 ID와 일치합니다.
+- 멘션만으로 항상 분석 스크립트가 실행되는 것은 아니며, 실제 실행은 사용자가 플러그인에 작업을 요청하거나 Codex가 해당 플러그인의 Skill을 사용해야 한다고 판단할 때 발생합니다.
+
+**결과**
+
+- 해당 멘션은 설치된 OpenBell Guard 플러그인을 가리키는 호출·참조 문법으로 보면 됩니다.
+- 이번 응답에서는 플러그인 실행을 하지 않았습니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-078 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
