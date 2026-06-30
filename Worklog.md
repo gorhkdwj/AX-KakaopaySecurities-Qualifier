@@ -4071,3 +4071,36 @@
 
 - 포트폴리오 핵심성과와 KPI 후보는 대화 답변으로 제공했습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-090 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+
+### W-091 · 포트폴리오 KPI 기록 위치 확인
+
+**요청**
+
+- 포트폴리오 KPI 지표가 `Worklog.md`에만 기록되어 있는지 확인했습니다.
+
+**수행 작업**
+
+- `Worklog.md`, `README.md`, `docs/p4-18-benchmark-report.md`, `docs/p4-19-packaging-report.md`, `docs/manual-test-reports/case-002-large-scenario.md`에서 KPI 후보와 근거 수치의 기록 위치를 확인했습니다.
+- KPI 후보라는 포트폴리오용 묶음과 각 근거 수치의 원천 문서가 어디에 있는지 구분했습니다.
+
+**변경 파일**
+
+- `Worklog.md`
+
+**검증**
+
+- `Worklog.md` W-090에는 포트폴리오 핵심성과와 KPI 후보가 요약되어 있습니다.
+- `README.md`에는 P4-18 benchmark 수치와 실행·검증 명령이 요약되어 있습니다.
+- `docs/p4-18-benchmark-report.md`에는 M-016 실행시간과 M-017 메모리 기준 및 결과가 상세 기록되어 있습니다.
+- `docs/p4-19-packaging-report.md`에는 ZIP 파일 수, 로그 수, pytest 68 passed 등 제출 패키징 검증 결과가 기록되어 있습니다.
+- `docs/manual-test-reports/case-002-large-scenario.md`에는 80,000행 합성 데이터 검증 결과가 상세 기록되어 있습니다.
+
+**판단 근거**
+
+- 포트폴리오 KPI 후보를 하나의 표로 정리한 별도 전용 문서는 아직 없고, W-090과 Notion 요약 및 대화 답변에만 묶음 형태로 존재합니다.
+- 다만 KPI를 구성하는 근거 수치는 README와 각 검증 보고서에 이미 분산 기록되어 있어, 필요하면 별도 포트폴리오 KPI 문서로 쉽게 승격할 수 있습니다.
+
+**결과**
+
+- 현재 KPI 후보 묶음은 Worklog W-090과 Notion, 대화 답변에 정리되어 있고, 근거 수치는 README와 개별 검증 보고서에 분산되어 있습니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-091 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
