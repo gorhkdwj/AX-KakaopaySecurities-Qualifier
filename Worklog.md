@@ -2372,4 +2372,4 @@
 - 남은 태스크는 P4-18~P4-19 약 2단계이며, 예상 작업량은 중간입니다.
 - 다음 단계는 P4-18 benchmark입니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-055 요약을 추가하고 D-034 하위 페이지를 생성했으며, D-034 fetch와 Phase 4 검색으로 반영을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이고 D-034 URL은 `https://app.notion.com/p/38f05ea68bfc81918247f116dc0fc601`입니다.
-- Git 동기화는 1차 커밋과 원격 push 후 완료 커밋으로 반영 예정입니다.
+- Git 동기화 완료: P4-17 산출물과 W-055/D-034/T-017 기록을 커밋 `bc43baefa85334acad9b3df5012bf1d76773360e`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영합니다.
