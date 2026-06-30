@@ -3628,3 +3628,102 @@
 
 - `submission.zip`에는 최상위 `README.md`가 존재합니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-080 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+
+### W-081 · 최종 README 검수와 불필요한 placeholder 파일 정리
+
+**요청**
+
+- 최종적으로 README 내용을 검수하고, 제출 ZIP과 `src/` 안에 불필요한 폴더·파일이 있는지 확인합니다.
+- `assets`, `references`, `scripts` 폴더의 `.gitkeep` 잔존 여부를 점검하고, 구조상 꼭 필요하지 않다면 정리합니다.
+
+**수행 작업**
+
+- `plugin-creator` Skill 지침을 확인해 `.codex-plugin/plugin.json`은 필수이고 `assets/`, `scripts/` 등은 선택 구성요소임을 재확인했습니다.
+- `scripts/`는 실행 코드 3개가 있어 유지했습니다.
+- `references/`는 `metrics-validation-contract.md` 지표 계약 복사본이 있어 유지했습니다.
+- `assets/`는 `.gitkeep` 외 실제 자산이 없어 폴더와 `.gitkeep`을 제거했습니다.
+- `references/.gitkeep`, `scripts/.gitkeep`, `src/tests/fixtures/.gitkeep`도 더 이상 폴더 보존 목적이 없어 제거했습니다.
+- 로컬 `src/skills/openbell-guard/scripts/__pycache__/` 캐시 폴더도 제거했습니다.
+- README의 제출 ZIP 파일 수를 최종 18개로 갱신했습니다.
+- `docs/p4-19-packaging-report.md`의 ZIP 파일 수와 설명도 최종 18개 기준으로 갱신했습니다.
+- `submission.zip`을 재생성했습니다.
+
+**변경 파일**
+
+- 수정: `README.md`
+- 수정: `docs/p4-19-packaging-report.md`
+- 삭제: `src/skills/openbell-guard/assets/.gitkeep`
+- 삭제: `src/skills/openbell-guard/references/.gitkeep`
+- 삭제: `src/skills/openbell-guard/scripts/.gitkeep`
+- 삭제: `src/tests/fixtures/.gitkeep`
+- 수정: `Worklog.md`
+- 재생성: `submission.zip`, `submission/`
+- 정리: 로컬 `src/skills/openbell-guard/scripts/__pycache__/`
+
+**검증**
+
+- `rg --files -g .gitkeep`
+  - 남은 `.gitkeep` 없음
+- `Get-ChildItem .\src\skills\openbell-guard -Recurse -Force`
+  - `references/metrics-validation-contract.md`
+  - `scripts/benchmark_openbell.py`
+  - `scripts/run_openbell.py`
+  - `scripts/validate_bundle.py`
+  - `SKILL.md`
+  - 빈 `assets/` 없음
+- `python "C:\Users\gorhk\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py" .\src`
+  - `Plugin validation passed`
+- `python -X utf8 "C:\Users\gorhk\.codex\skills\.system\skill-creator\scripts\quick_validate.py" .\src\skills\openbell-guard`
+  - `Skill is valid!`
+- `python .\tools\preflight_check.py --quiet`
+  - `SUMMARY ok=5 warn=0 error=0`
+- `python -m pytest src\tests`
+  - `68 passed`
+- `python .\tools\build_submission.py`
+  - `zip_file_count: 18`
+  - `log_file_count: 1`
+  - `status: built`
+- `python .\tools\validate_submission.py .\submission.zip`
+  - `status: passed`
+  - `file_count: 18`
+  - 최상위 항목: `README.md`, `logs`, `src`
+- ZIP 내부 점검
+  - `has_README=True`
+  - `has_gitkeep=False`
+  - `has_assets_entry=False`
+  - `has_references_contract=True`
+  - `script_count=3`
+  - `default_prompt_lengths=[56, 60, 56]`
+- README 점검
+  - UTF-8 읽기 성공
+  - replacement character 없음
+  - 주요 섹션 존재: 제목, 해결하려는 문제, 제출물 구조, 실행 방법, 동작 절차와 판단 기준, 대표 검증 결과, 안전 경계, 한계
+  - `ZIP 내부 파일 수: 18개` 반영 확인
+  - `TODO`, `TBD`, `FIXME` 없음
+  - 코드펜스 개수 8개로 짝수
+- ZIP 내부 대표 fixture 실행
+  - `run_status=report_validated`
+  - `output_validation.status=passed`
+  - `raw_excerpts_emitted=false`
+- ZIP 내부 출력 독립 검증
+  - `status=passed`
+  - `fatal=0`
+  - `secret_residue=passed`
+
+**트러블슈팅**
+
+- README 한글 heading 검색은 PowerShell 파이프 한글 리터럴 문제를 피하기 위해 Unicode escape 출력과 ASCII marker 중심으로 확인했습니다. 기존 T-027의 재발 방지 방식을 적용했습니다.
+
+**판단 근거**
+
+- `assets/`는 실제 자산이 없고 manifest에서도 선언하지 않으므로 제출 구조에 남길 필요가 없습니다.
+- `scripts/`와 `references/`는 실제 실행 코드와 지표 계약 복사본을 포함하므로 유지해야 합니다.
+- `.gitkeep`은 빈 폴더를 Git에 보존하기 위한 placeholder일 뿐이며, 폴더 안에 실제 파일이 있거나 폴더 자체가 필요 없으면 제출 ZIP에 포함하지 않는 편이 더 깔끔합니다.
+- `src/tests/fixtures/`도 실제 fixture가 있으므로 `.gitkeep`이 필요하지 않습니다.
+
+**결과**
+
+- 최종 제출 ZIP은 `README.md`, `logs/`, `src/` 최상위 구조를 유지하면서 불필요한 `.gitkeep`과 빈 `assets/`를 제거한 18개 파일 구조가 됐습니다.
+- README와 P4-19 보고서가 최신 ZIP 파일 수 18개와 일치합니다.
+- 중요한 새 아키텍처·보안·데이터 처리 결정은 없어 Decisionlog에는 추가하지 않았습니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-081 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
