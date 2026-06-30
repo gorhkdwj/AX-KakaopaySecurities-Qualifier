@@ -3330,3 +3330,59 @@
 - 제출 전에는 README에 “동작 절차와 판단 기준” 섹션을 추가해 문항 3 답변과 더 직접적으로 맞추는 것이 좋습니다.
 - 중요한 새 결정은 없어 Decisionlog는 추가하지 않았습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-074 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+
+### W-075 · README 동작 절차·판단 기준 보강과 Codex UI 설치 확인 가능성 진단
+
+**요청**
+
+- 문항 3 답변과 정합성을 맞추기 위해 README를 보강합니다.
+- ZIP 파일 README를 수정 반영해 새로 압축하기 전에 새 Codex UI 설치 확인을 해보는 것이 좋은지 검토합니다.
+
+**수행 작업**
+
+- `plugin-creator` Skill과 기존 로컬 플러그인 업데이트 참고 문서를 확인했습니다.
+- 루트 `README.md`에 `동작 절차와 판단 기준` 섹션을 추가했습니다.
+- 새 섹션에는 입력 사전 검사, 민감정보 마스킹, 로그·메트릭 정규화, 지표 계산, 상태 판정, claim/evidence 보고서 생성, 정보 부족 시 동작을 설명했습니다.
+- Codex CLI의 `plugin list`, `plugin add --help`, `plugin marketplace --help`, `plugin marketplace list`를 확인했습니다.
+- 기본 개인 marketplace 파일 `~/.agents/plugins/marketplace.json` 존재 여부를 확인했습니다.
+
+**변경 파일**
+
+- 수정: `README.md`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `git diff --check`
+  - exit code 0
+  - CRLF 변환 안내만 표시됐고 whitespace 오류는 없었습니다.
+- `python .\tools\preflight_check.py --quiet`
+  - `SUMMARY ok=5 warn=0 error=0`
+- `Select-String -Path .\README.md -Pattern "동작 절차와 판단 기준|입력 사전 검사|민감정보 마스킹|상태 판정|정보가 부족"`
+  - 새 README 섹션과 핵심 문구가 존재함을 확인했습니다.
+- ZIP 내부 README 대조
+  - 루트 README에는 새 섹션이 있습니다.
+  - `submission.zip` 내부 README에는 아직 새 섹션이 없습니다.
+  - 따라서 ZIP은 아직 재빌드하지 않은 상태입니다.
+- Codex CLI 설치 진단
+  - `codex plugin list`에서 `openbell-guard`는 발견되지 않았습니다.
+  - `codex plugin marketplace list`에는 `openai-primary-runtime`, `openai-bundled`, `claude-plugins-official`, `openai-curated`만 표시됐습니다.
+  - 기본 개인 marketplace 파일 `~/.agents/plugins/marketplace.json`은 존재하지 않았습니다.
+
+**트러블슈팅**
+
+- ZIP 내부 README 대조용 임시 Python 스크립트에서 한글 문자열 리터럴이 콘솔 인코딩 영향을 받아 처음에는 새 섹션을 찾지 못했습니다. 기존 T-023 유형으로 보고 Unicode escape 문자열로 재검증했습니다.
+
+**판단 근거**
+
+- README 보강은 제출 폼 문항 3의 “절차, 지식, 판단 기준, 정보 부족 시 동작” 요구사항과 ZIP README 정합성을 맞추기 위해 필요합니다.
+- 새 Codex UI 설치 확인은 해보는 것이 좋지만, 현재 `openbell-guard`가 marketplace에 등록되어 있지 않아 실제 설치 확인을 하려면 개인 marketplace 생성 또는 로컬 marketplace 등록이 필요합니다.
+- 개인 marketplace 생성이나 플러그인 설치는 사용자 전역 Codex 설정을 바꾸는 작업이므로, 현재 턴에서는 읽기 전용 진단까지만 수행했습니다.
+
+**결과**
+
+- 루트 README는 문항 3 답변과 더 직접적으로 맞게 보강됐습니다.
+- `submission.zip`은 아직 재생성하지 않았습니다.
+- 추천: 다음 단계에서 사용자가 승인하면 개인 marketplace 또는 임시 로컬 marketplace 기반으로 Codex UI 설치 확인을 진행한 뒤, `tools/build_submission.py`로 ZIP을 재생성하고 `tools/validate_submission.py`로 다시 검증합니다.
+- 중요한 새 아키텍처·보안·데이터 처리 결정은 아직 없어 Decisionlog는 추가하지 않았습니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-075 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
