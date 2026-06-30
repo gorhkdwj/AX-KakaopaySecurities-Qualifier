@@ -3386,3 +3386,41 @@
 - 추천: 다음 단계에서 사용자가 승인하면 개인 marketplace 또는 임시 로컬 marketplace 기반으로 Codex UI 설치 확인을 진행한 뒤, `tools/build_submission.py`로 ZIP을 재생성하고 `tools/validate_submission.py`로 다시 검증합니다.
 - 중요한 새 아키텍처·보안·데이터 처리 결정은 아직 없어 Decisionlog는 추가하지 않았습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-075 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+
+### W-076 · Codex marketplace 구성부터 UI 설치 검증까지의 절차 설명
+
+**요청**
+
+- OpenBell Guard를 Codex marketplace에 구성하고 새 Codex UI 설치 확인부터 제출 ZIP 재검증까지 어떻게 진행하면 되는지 전체 절차를 설명합니다.
+
+**수행 작업**
+
+- `plugin-creator`의 plugin manifest와 marketplace JSON 참고 문서를 확인했습니다.
+- `codex plugin marketplace add --help`와 `codex plugin marketplace remove --help`를 확인했습니다.
+- 현재 프로젝트 구조상 제출 플러그인 루트는 `src/`이지만, marketplace 설치 테스트에서는 `plugins/openbell-guard/` 형태의 스테이징 복사본을 쓰는 편이 안전하다고 정리했습니다.
+- 전역 개인 marketplace를 바로 만드는 방식보다 `out/` 하위 임시 로컬 marketplace를 구성해 검증하는 방식을 우선 추천했습니다.
+
+**변경 파일**
+
+- 수정: `Worklog.md`
+
+**검증**
+
+- Codex CLI help에서 `codex plugin marketplace add <SOURCE>`와 `codex plugin marketplace remove <MARKETPLACE_NAME>` 명령 형태를 확인했습니다.
+- 기존 진단 결과에서 `openbell-guard`가 plugin list에 없고, 기본 개인 marketplace 파일이 없음을 반영했습니다.
+
+**트러블슈팅**
+
+- 새 오류는 없었습니다.
+
+**판단 근거**
+
+- 실제 설치 검증은 Codex 전역 설정에 marketplace source와 plugin install 상태를 추가할 수 있으므로, 사용자 승인 없이 바로 실행하지 않는 편이 안전합니다.
+- 임시 marketplace를 `out/` 아래 만들면 Git 추적·제출 ZIP·원본 `src/` 구조에 영향을 주지 않고 설치 검증을 할 수 있습니다.
+- 검증 후 `codex plugin marketplace remove`로 정리할 수 있어 전역 설정 잔여 위험도 줄일 수 있습니다.
+
+**결과**
+
+- 다음 답변에서 marketplace 구성, 설치 확인, 새 Codex UI 검증, 정리, ZIP 재생성·검증 순서를 제안합니다.
+- 중요한 새 결정은 아직 없어 Decisionlog는 추가하지 않았습니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-076 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
