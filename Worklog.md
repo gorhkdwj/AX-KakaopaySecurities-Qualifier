@@ -3590,3 +3590,41 @@
 - 제출 ZIP 기준으로도 플러그인 구조와 실행 코드는 포함되어 있고, ZIP 내부 경로 실행 검증은 통과했습니다.
 - 다만 `openbell-guard-local` marketplace 등록 자체가 ZIP에 자동 포함되는 것은 아니므로, 제출 ZIP 사용자는 `src/`를 플러그인 루트로 설치·인식해야 합니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-079 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+
+### W-080 · submission.zip 최상위 README.md 포함 여부 확인
+
+**요청**
+
+- 현재 `submission.zip`에 README 파일이 없는 것처럼 보이므로 실제 포함 여부를 확인합니다.
+
+**수행 작업**
+
+- Python `zipfile`로 `submission.zip`을 직접 열어 최상위 항목과 README 유사 항목을 확인했습니다.
+- 추가 플러그인 실행이나 분석 파이프라인 실행은 하지 않았습니다.
+
+**변경 파일**
+
+- 수정: `Worklog.md`
+
+**검증**
+
+- `submission.zip` 존재 확인: `zip_exists=True`
+- ZIP 크기 확인: `zip_size_bytes=261585`
+- 최상위 항목 확인: `['README.md', 'logs', 'src']`
+- 루트 README 확인: `has_root_README_md=True`
+- README 유사 항목 확인: `['README.md']`
+
+**트러블슈팅**
+
+- 새 오류는 없었습니다.
+
+**판단 근거**
+
+- 과제 제출 구조상 README는 `src/` 안이 아니라 `submission.zip`의 최상위에 있어야 합니다.
+- 현재 ZIP 최상위에 `README.md`가 있으므로 제출 구조는 의도와 일치합니다.
+- 사용자가 압축 파일 내부의 `src/` 폴더로 들어간 상태에서 확인했다면 README가 보이지 않을 수 있습니다.
+
+**결과**
+
+- `submission.zip`에는 최상위 `README.md`가 존재합니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-080 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
