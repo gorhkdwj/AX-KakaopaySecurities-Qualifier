@@ -4104,3 +4104,41 @@
 
 - 현재 KPI 후보 묶음은 Worklog W-090과 Notion, 대화 답변에 정리되어 있고, 근거 수치는 README와 개별 검증 보고서에 분산되어 있습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-091 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+
+### W-092 · 포트폴리오 KPI 전용 문서 통합 정리
+
+**요청**
+
+- 흩어져 있던 OpenBell Guard의 포트폴리오 핵심성과와 KPI 지표를 모아서 정리했습니다.
+
+**수행 작업**
+
+- `README.md`, P4-18 benchmark 보고서, P4-19 패키징 보고서, case-002 수동 테스트 보고서, Worklog, Decisionlog, Troubleshootinglog에 분산된 KPI 근거를 확인했습니다.
+- `docs/portfolio-kpi-summary.md`를 새로 작성해 핵심성과, KPI 스코어카드, 대표 KPI 5개, 포트폴리오 문장 예시, 사용하면 좋은 표현과 피해야 할 표현을 정리했습니다.
+- `docs/README.md`에 포트폴리오 KPI 요약 문서 링크를 추가했습니다.
+
+**변경 파일**
+
+- `docs/portfolio-kpi-summary.md`
+- `docs/README.md`
+- `Worklog.md`
+
+**검증**
+
+- KPI 수치 근거를 기존 문서와 대조했습니다.
+  - 자동 테스트: `docs/p4-19-packaging-report.md`의 `68 passed`
+  - 대규모 합성 데이터: `docs/manual-test-reports/case-002-large-scenario.md`의 총 80,000행
+  - 실행시간: `docs/p4-18-benchmark-report.md`의 M-016 중앙값 34.523738초
+  - Python 추적 메모리: `docs/p4-18-benchmark-report.md`의 M-017 최고값 194.280592MiB
+  - 제출 ZIP 구조: `docs/p4-19-packaging-report.md`의 18개 파일, 로그 파일 1개
+- 이번 요청은 포트폴리오 설명용 문서 통합 작업이며 기능·아키텍처·보안·데이터 처리 정책 변경이 아니므로 `Decisionlog.md`에는 새 항목을 추가하지 않았습니다.
+
+**판단 근거**
+
+- KPI가 Worklog와 개별 검증 보고서에 분산되어 있으면 포트폴리오 작성 시 매번 근거를 다시 찾아야 하므로, 전용 요약 문서가 필요하다고 판단했습니다.
+- 실제 운영 성과로 오해될 수 있는 표현을 방지하기 위해 KPI마다 “로컬 합성 데이터·제출 패키지 검증 기준”이라는 한계를 함께 명시했습니다.
+
+**결과**
+
+- OpenBell Guard의 포트폴리오 핵심성과와 KPI를 `docs/portfolio-kpi-summary.md`에 통합 정리했습니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-092 요약을 추가하고 재조회로 존재를 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
