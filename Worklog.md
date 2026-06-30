@@ -2281,6 +2281,7 @@
 - 최초 보고서 확인 중 claim statement에 `66.667`처럼 `analysis.json`의 원시 소수 셋째 자리 표시가 남아 있었습니다.
 - 계약서의 보고서 표시값 반올림 기준에 맞춰 `report_display_statement()`를 추가하고 테스트에 `66.67` 포함·`66.667` 미포함 검증을 넣어 해결했습니다.
 - 같은 smoke 출력 폴더를 재사용하니 이전 검증 파일까지 스캔되어 `checked_file_count`가 일시적으로 늘었습니다. 기록용 검증은 새 폴더 `out/p4-16-final-smoke`로 다시 수행했습니다.
+- 후속 Git push 과정에서 작업 디렉터리 문자열 오타가 1회 발생해 T-016으로 기록했습니다. 올바른 경로에서 재실행해 push를 완료했습니다.
 
 **판단 근거**
 
@@ -2298,4 +2299,4 @@
 - 남은 태스크는 P4-17~P4-19 약 3단계이며, 예상 작업량은 중간~높음입니다.
 - 다음 단계는 P4-17 통합 시나리오 또는 scenario matrix 검증입니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-054 요약을 추가하고 D-033 하위 페이지를 생성했으며, fetch로 두 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이고 D-033 URL은 `https://app.notion.com/p/38f05ea68bfc81aba547e1293bc3c138`입니다.
-- Git 동기화는 Notion 동기화 후 수행 예정입니다.
+- Git 동기화 완료: P4-16 산출물과 W-054/D-033/T-015 기록을 커밋 `d18a75a3b9ebe760bb5b33ecec1ee69db10e7f35`로 원격 `origin/main`에 push했습니다. 이후 T-016과 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영합니다.
