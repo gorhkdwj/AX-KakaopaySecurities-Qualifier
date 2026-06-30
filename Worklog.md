@@ -3288,3 +3288,45 @@
 - 답변 txt는 Git ignore 대상입니다.
 - 중요한 새 아키텍처·보안·데이터 처리 결정은 없어 Decisionlog는 추가하지 않았습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-073 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+
+### W-074 · 문항 3 답변의 README·제출 ZIP 반영 여부 확인
+
+**요청**
+
+- “플러그인은 어떻게 작동하나요?” 문항 답변의 내용이 Git main의 `README.md`와 `submission.zip` 안의 `README.md`에도 반영되어 있는지 확인합니다.
+
+**수행 작업**
+
+- 로컬 `README.md`를 확인했습니다.
+- `git show HEAD:README.md`로 현재 Git main에 커밋된 README 내용을 확인했습니다.
+- `submission.zip` 내부의 `README.md`를 Python `zipfile`로 열어 확인했습니다.
+- `submission-form-answers.txt`의 문항 3 답변과 세 README 내용을 대조했습니다.
+
+**변경 파일**
+
+- 수정: `Worklog.md`
+
+**검증**
+
+- Git main의 `README.md`와 `submission.zip` 내부 `README.md`는 같은 핵심 내용을 담고 있음을 확인했습니다.
+- README에는 실행 명령, 생성 산출물, 결과 읽는 순서, 안전 경계, 한계가 반영되어 있습니다.
+- 다만 문항 3 답변에 있는 다음 세부 내용은 README에는 요약 수준으로만 들어가 있거나 직접 명시되어 있지 않습니다.
+  - 필수 파일·UTF-8·파일 크기·사고 구간·시간대·service-map 구조 검사 절차
+  - 민감정보 마스킹 후 원값 잔존 재검사 절차
+  - `>` 임계치, 2개 연속 breach/healthy, `unknown`, `null`, `reason_code` 처리 기준
+
+**트러블슈팅**
+
+- 새 오류는 없었습니다.
+
+**판단 근거**
+
+- 제출 폼 문항 3은 “절차, 지식, 판단 기준, 정보 부족 시 동작”을 요구하고, 세부 내용이 ZIP README에도 있어야 한다고 명시합니다.
+- 현재 README는 사용법과 검증 결과 중심으로는 충분하지만, 문항 3의 판단 기준을 그대로 뒷받침하기에는 조금 압축되어 있습니다.
+
+**결과**
+
+- 결론: Git main README와 ZIP README에는 문항 3 내용이 부분 반영되어 있습니다.
+- 제출 전에는 README에 “동작 절차와 판단 기준” 섹션을 추가해 문항 3 답변과 더 직접적으로 맞추는 것이 좋습니다.
+- 중요한 새 결정은 없어 Decisionlog는 추가하지 않았습니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-074 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
