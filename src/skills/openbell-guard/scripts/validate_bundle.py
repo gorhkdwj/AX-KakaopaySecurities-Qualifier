@@ -1,6 +1,6 @@
 """Validate OpenBell Guard generated outputs.
 
-This thin CLI wrapper reuses the P4-16 output validation functions from
+This thin CLI wrapper reuses the P4-17 output validation functions from
 ``run_openbell.py``. It validates an already generated output directory,
 including ``analysis.json`` and ``openbell-report.md``.
 """
@@ -19,7 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="validate_bundle.py",
         description=(
-            "Validate OpenBell Guard output files. P4-16 checks analysis.json "
+            "Validate OpenBell Guard output files. P4-17 checks analysis.json "
             "schema, evidence references, confirmed_fact evidence, report claim "
             "markers, and sensitive residue in generated outputs."
         ),

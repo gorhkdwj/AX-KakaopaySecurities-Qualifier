@@ -1,6 +1,6 @@
 """OpenBell Guard command-line entry point.
 
-P4-16 implements the shared CLI, bundle preflight gate, sanitizer,
+P4-17 implements the shared CLI, bundle preflight gate, sanitizer,
 line-oriented telemetry parser, 60-second bucket preparation, basic bucket
 metrics, observability lag metrics, baseline-vs-incident comparisons,
 threshold-based state judgment with context metrics, evidence-backed claims,
@@ -62,7 +62,7 @@ EXIT_CODES = {
     "output_validation_error": 5,
 }
 
-CLI_STAGE = "P4-16"
+CLI_STAGE = "P4-17"
 SUMMARY_FILENAME = "openbell-cli-summary.json"
 ANALYSIS_FILENAME = "analysis.json"
 REPORT_FILENAME = "openbell-report.md"
@@ -246,7 +246,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="run_openbell.py",
         description=(
-            "Prepare an OpenBell Guard run directory. P4-16 validates the CLI, "
+            "Prepare an OpenBell Guard run directory. P4-17 validates the CLI, "
             "paths, bundle file contract, byte limits, incident metadata, and "
             "creates a masked working copy, telemetry record summary, bucket summary, "
             "metric summary, threshold-based state summary, evidence summary, "

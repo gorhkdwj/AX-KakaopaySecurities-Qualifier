@@ -7,7 +7,7 @@ description: Analyze a synthetic or anonymized post-incident brokerage bundle fo
 
 OpenBell Guard는 카카오페이증권 AX 해커톤 제출물을 위한 Codex Skill입니다.
 
-현재 구현 상태는 Phase 4의 P4-16 Skill 보고서 워크플로 단계입니다. 플러그인 구조, 지표 계약 복사본, 최소 합성 fixture, `run_openbell.py --bundle --output` 실행 입구, 독립 출력 검증기 `validate_bundle.py --output`, 그리고 `analysis.json` 기반 `openbell-report.md` 보고서 초안 생성 흐름이 있습니다.
+현재 구현 상태는 Phase 4의 P4-17 통합 시나리오 검증 단계입니다. 플러그인 구조, 지표 계약 복사본, 최소 합성 fixture, `run_openbell.py --bundle --output` 실행 입구, 독립 출력 검증기 `validate_bundle.py --output`, `analysis.json` 기반 `openbell-report.md` 보고서 초안 생성 흐름, 그리고 A~H 합성 시나리오 통합 테스트가 있습니다.
 
 ## 현재 사용 가능한 범위
 
@@ -50,7 +50,7 @@ python src/skills/openbell-guard/scripts/validate_bundle.py --output out/domesti
 - `openbell-report.md`
 - `output-validation.json`
 
-`analysis.json`은 P4-16 기준 최종 기계 검증용 원장이며, `openbell-report.md`는 이 원장을 사람이 읽기 쉽게 옮긴 검토용 초안입니다. `output-validation.json`은 원장, 보고서 claim marker와 산출물의 자체 검증 결과입니다.
+`analysis.json`은 P4-17 기준 최종 기계 검증용 원장이며, `openbell-report.md`는 이 원장을 사람이 읽기 쉽게 옮긴 검토용 초안입니다. `output-validation.json`은 원장, 보고서 claim marker와 산출물의 자체 검증 결과입니다.
 
 ## 기본 지표 계산 기준
 
@@ -111,6 +111,17 @@ python src/skills/openbell-guard/scripts/validate_bundle.py --output out/domesti
 - `output-validation.json`은 `analysis.json` 구조, 끊어진 evidence 참조, 근거 없는 `confirmed_fact`, 보고서 claim marker 누락·미존재, 민감정보 잔존 여부를 기록합니다.
 - `OUT004_REPORT_CLAIM_REF`는 P4-16부터 활성화되어, 보고서 claim 문장에 없는 claim ID가 붙거나 필요한 claim ID가 빠지면 fatal 오류로 처리합니다.
 
+## P4-17 통합 시나리오 검증 범위
+
+- A. 국내장 개장 피크와 경로별 부분 장애: 시세·관심종목 경로가 느려져도 주문 경로가 정상일 수 있음을 분리합니다.
+- B. 외부 중개사 장애: `overseas_broker` 의존성과 내부 정상 경로를 분리합니다.
+- C. 불완전 데이터: 임계치나 보조 telemetry가 부족하면 가능한 계산만 수행하고 `degraded`·`unknown`으로 남깁니다.
+- D. 비밀정보 포함 입력: 합성 secret 원값이 마스킹 작업본과 최종 산출물에 남지 않는지 확인합니다.
+- E. 서비스 정상·로그 유입 지연: 서비스 오류율은 정상인데 관측 지연만 큰 경우 서비스 장애로 단정하지 않습니다.
+- F. 타임아웃 증상과 경쟁 가설: `DB connection timeout` 같은 메시지를 DB 또는 JVM 근본 원인으로 승격하지 않습니다.
+- G. 통계 경계와 임계치: `>` 임계치 비교, 2개 연속 breach, 2개 연속 healthy 회복 규칙을 검증합니다.
+- H. 손상 입력과 지원 한도: 손상 행은 degraded로 기록하고 파일 한도 초과는 exit 4로 중단합니다.
+
 ## 안전 원칙
 
 - OpenBell Guard는 읽기 전용 분석 도구입니다.
@@ -120,4 +131,4 @@ python src/skills/openbell-guard/scripts/validate_bundle.py --output out/domesti
 
 ## 다음 구현 예정 범위
 
-다음 단계에서는 통합 시나리오, 실행시간·Python 추적 메모리 benchmark, 제출 패키징 검증을 순차적으로 구현합니다.
+다음 단계에서는 실행시간·Python 추적 메모리 benchmark와 제출 패키징 검증을 순차적으로 구현합니다.

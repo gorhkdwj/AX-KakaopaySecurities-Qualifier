@@ -1,6 +1,6 @@
 """CLI, bundle-preflight, sanitizer, row-parser, bucket, metric, state, claim, analysis, report, and output validation tests.
 
-P4-16 keeps the shared command-line entry point, validates the final
+P4-17 keeps the shared command-line entry point, validates the final
 machine-verifiable analysis.json, creates openbell-report.md from that
 validated analysis, and validates report claim markers.
 """
@@ -214,7 +214,7 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertTrue(summary_path.exists())
 
             payload = json.loads(summary_path.read_text(encoding="utf-8"))
-            self.assertEqual("P4-16", payload["stage"])
+            self.assertEqual("P4-17", payload["stage"])
             self.assertEqual("report_validated", payload["run_status"])
             self.assertFalse(payload["bundle"]["raw_telemetry_records_parsed"])
             self.assertTrue(payload["bundle"]["sanitized_telemetry_records_parsed"])
@@ -460,7 +460,7 @@ class SanitizationTest(unittest.TestCase):
             self.assertEqual(original_logs, (bundle_path / "logs.jsonl").read_text(encoding="utf-8"))
 
             summary = json.loads((output_path / "openbell-cli-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-16", summary["stage"])
+            self.assertEqual("P4-17", summary["stage"])
             self.assertTrue(summary["outputs"]["sanitization_report_created"])
             self.assertTrue(summary["outputs"]["analysis_json_created"])
             self.assertEqual(7, summary["sanitization"]["total_redactions"])
@@ -665,7 +665,7 @@ class BucketSummaryTest(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             bucket_summary = json.loads((output_path / "bucket-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-16", bucket_summary["stage"])
+            self.assertEqual("P4-17", bucket_summary["stage"])
             self.assertEqual("UTC", bucket_summary["time_basis"])
             self.assertEqual("Asia/Seoul", bucket_summary["display_timezone"])
             self.assertEqual(["service_path", "bucket_start_utc"], bucket_summary["sort_order"])
@@ -731,7 +731,7 @@ class BasicMetricSummaryTest(unittest.TestCase):
             metric_summary = json.loads((output_path / "metric-summary.json").read_text(encoding="utf-8"))
             expected_analysis = json.loads(EXPECTED_ANALYSIS.read_text(encoding="utf-8"))
 
-            self.assertEqual("P4-16", metric_summary["stage"])
+            self.assertEqual("P4-17", metric_summary["stage"])
             self.assertEqual("logs.jsonl", metric_summary["primary_telemetry"])
             self.assertEqual(
                 [
@@ -1290,7 +1290,7 @@ class StateSummaryTest(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             state_summary = json.loads((output_path / "state-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-16", state_summary["stage"])
+            self.assertEqual("P4-17", state_summary["stage"])
             self.assertEqual("complete", state_summary["run"]["status"])
             self.assertEqual(0, state_summary["run"]["exit_code"])
             self.assertEqual([], state_summary["run"]["limitations"])
@@ -1435,7 +1435,7 @@ class EvidenceClaimSummaryTest(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             evidence_summary = json.loads((output_path / "evidence-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-16", evidence_summary["stage"])
+            self.assertEqual("P4-17", evidence_summary["stage"])
             self.assertEqual("complete", evidence_summary["status"])
             self.assertFalse(evidence_summary["raw_excerpts_emitted"])
             self.assertGreaterEqual(evidence_summary["evidence_count"], 4)
@@ -1514,7 +1514,7 @@ class AnalysisJsonOutputTest(unittest.TestCase):
             analysis = json.loads((output_path / "analysis.json").read_text(encoding="utf-8"))
 
             self.assertEqual("1.0", analysis["schema_version"])
-            self.assertEqual("P4-16", analysis["stage"])
+            self.assertEqual("P4-17", analysis["stage"])
             self.assertEqual(expected["contract_version"], analysis["contract_version"])
             self.assertEqual(expected["contract_sha256"], analysis["contract_sha256"])
             self.assertEqual(expected["fixture_id"], analysis["fixture_id"])
@@ -1648,7 +1648,7 @@ class OutputValidationTest(unittest.TestCase):
 
             self.assertEqual(0, validated.returncode, validated.stderr)
             payload = json.loads(validated.stdout)
-            self.assertEqual("P4-16", payload["stage"])
+            self.assertEqual("P4-17", payload["stage"])
             self.assertEqual("passed", payload["status"])
             self.assertEqual(0, payload["exit_code"])
             self.assertEqual("passed", payload["checks"]["analysis_schema"])

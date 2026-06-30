@@ -2300,3 +2300,76 @@
 - 다음 단계는 P4-17 통합 시나리오 또는 scenario matrix 검증입니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-054 요약을 추가하고 D-033 하위 페이지를 생성했으며, fetch로 두 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이고 D-033 URL은 `https://app.notion.com/p/38f05ea68bfc81aba547e1293bc3c138`입니다.
 - Git 동기화 완료: P4-16 산출물과 W-054/D-033/T-015 기록을 커밋 `d18a75a3b9ebe760bb5b33ecec1ee69db10e7f35`로 원격 `origin/main`에 push했습니다. 이후 T-016과 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영합니다.
+
+### W-055 · Phase 4 P4-17 통합 시나리오 검증
+
+**요청**
+
+- 다음 단계 구현을 진행합니다. 현재 순서상 P4-17 통합 시나리오 또는 scenario matrix 검증을 구현합니다.
+
+**수행 작업**
+
+- `run_openbell.py`의 단계명을 P4-17로 올렸습니다.
+- `validate_bundle.py`, `SKILL.md`, 기존 CLI 테스트의 stage 기대값을 P4-17 기준으로 갱신했습니다.
+- `src/tests/test_integration_scenarios.py`를 추가해 A~H 합성 시나리오를 임시 번들로 생성하고 CLI와 독립 validator를 실제 실행하도록 했습니다.
+- 시나리오 A는 국내장 개장 피크에서 `market_data`, `watchlist_info` 부분 장애와 `order_execution` 정상 상태를 함께 검증합니다.
+- 시나리오 B는 `overseas_broker` 외부 의존성 장애와 내부 `auth_access` 정상 상태를 분리합니다.
+- 시나리오 C는 임계치와 보조 telemetry가 부족한 불완전 데이터를 `degraded`·`unknown`으로 처리하고 보고서 claim 검증이 통과하는지 확인합니다.
+- 시나리오 D는 seeded secret 원값이 모든 생성 산출물에 남지 않는지 확인합니다.
+- 시나리오 E는 서비스 오류율은 정상이고 관측 지연만 큰 경우 서비스 장애 가설을 생성하지 않는지 확인합니다.
+- 시나리오 F는 `DB connection timeout` 메시지를 DB·JVM 근본 원인으로 승격하지 않는지 확인합니다.
+- 시나리오 G는 error rate 50.0% 경계, 2개 연속 breach, 2개 연속 healthy 회복 규칙을 검증합니다.
+- 시나리오 H는 손상 JSONL 행은 degraded로 기록하고, 파일 한도 초과는 `exit 4`와 `LIM001_FILE_BYTES`로 중단하는지 확인합니다.
+- `docs/p4-17-scenario-matrix.md`를 새로 작성하고 `docs/README.md`에 연결했습니다.
+- D-034와 T-017을 기록했습니다.
+
+**변경 파일**
+
+- 수정: `src/skills/openbell-guard/scripts/run_openbell.py`
+- 수정: `src/skills/openbell-guard/scripts/validate_bundle.py`
+- 수정: `src/skills/openbell-guard/SKILL.md`
+- 수정: `src/tests/test_run_openbell_cli.py`
+- 추가: `src/tests/test_integration_scenarios.py`
+- 추가: `docs/p4-17-scenario-matrix.md`
+- 수정: `docs/README.md`
+- 수정: `Decisionlog.md`
+- 수정: `Troubleshootinglog.md`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `python -m py_compile .\src\skills\openbell-guard\scripts\run_openbell.py .\src\skills\openbell-guard\scripts\validate_bundle.py .\src\tests\test_run_openbell_cli.py .\src\tests\test_integration_scenarios.py`가 통과했습니다.
+- `python -m unittest .\src\tests\test_integration_scenarios.py -v`를 실행해 P4-17 A~H 통합 시나리오 테스트 9개가 모두 통과했습니다.
+- `python -m unittest .\src\tests\test_run_openbell_cli.py -v`를 실행해 기존 CLI·입력·마스킹·지표·상태·보고서·출력 검증기 테스트 44개가 모두 통과했습니다.
+- `python -m unittest discover .\src\tests -v`를 실행해 전체 테스트 65개가 모두 통과했습니다.
+- `python .\tools\preflight_check.py --quiet` 결과 `SUMMARY ok=5 warn=0 error=0`을 확인했습니다.
+- `python $env:USERPROFILE\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src`가 `Plugin validation passed`로 통과했습니다.
+- `python -X utf8 $env:USERPROFILE\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard`가 `Skill is valid!`로 통과했습니다.
+- `python .\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\src\tests\fixtures\domestic-market-open-min\bundle --output .\out\p4-17-final-smoke`를 실행해 exit 0, `stage=P4-17`, `run_status=report_validated`, `openbell_report_created=true`, `report_claim_refs=passed`, `checked_file_count=12`를 확인했습니다.
+- `python .\src\skills\openbell-guard\scripts\validate_bundle.py --output .\out\p4-17-final-smoke`를 실행해 exit 0, `status=passed`, `analysis_schema=passed`, `evidence_references=passed`, `confirmed_fact_evidence=passed`, `report_claim_refs=passed`, `secret_residue=passed`를 확인했습니다.
+- `logs/` 파일은 수동 편집하지 않았습니다.
+
+**트러블슈팅**
+
+- T-017을 기록했습니다.
+- H 시나리오에서 파일 크기 초과 issue code를 `LIM001_FILE_TOO_LARGE`로 잘못 기대해 테스트가 1회 실패했습니다.
+- 실제 구현과 계약의 issue code는 `LIM001_FILE_BYTES`였으므로 테스트 기대값을 수정하고 P4-17 테스트 9개를 재실행해 통과를 확인했습니다.
+- P4-17 stage 기대값 갱신 중 한글 절대경로 patch가 실패해 T-016의 재발 방지 규칙대로 상대경로 patch로 전환했습니다.
+
+**판단 근거**
+
+- A~H 시나리오를 모두 정적 fixture 파일로 커밋하면 저장소가 불필요하게 커지고, 같은 형태의 로그 작성이 반복됩니다.
+- P4-17의 목적은 대표 성공·실패·경계 상황을 자동으로 재현하는 것이므로, 테스트 실행 중 임시 합성 번들을 만드는 방식이 더 가볍고 유지보수하기 쉽습니다.
+- 단, 심사자가 시나리오 의미를 볼 수 있도록 `docs/p4-17-scenario-matrix.md`에 각 시나리오의 입력과 기대 결과를 문서화했습니다.
+- 새 분석 기능을 무리하게 추가하지 않고, 기존 CLI·마스킹·분석·보고서·validator 흐름이 여러 조건에서 흔들리지 않는지 확인하는 데 집중했습니다.
+
+**결과**
+
+- P4-17이 완료됐습니다. 이제 OpenBell Guard는 대표 A~H 합성 시나리오를 통해 부분 장애, 외부 의존성, 불완전 데이터, 비밀정보, 관측 지연, 원인 단정 방지, 임계치 경계와 지원 한도 오류를 자동 검증합니다.
+- 관련 결정: D-034 `P4-17 시나리오는 정적 대량 fixture 대신 임시 합성 번들 기반 통합 테스트로 검증`
+- 관련 트러블슈팅: T-017 `H 시나리오 파일 한도 issue code 기대값을 잘못 쓴 문제`
+- 현재 단계는 Phase 4의 P4-17/19이며, P4-16 Skill 보고서 워크플로 다음의 통합 시나리오 검증 단계입니다.
+- 남은 태스크는 P4-18~P4-19 약 2단계이며, 예상 작업량은 중간입니다.
+- 다음 단계는 P4-18 benchmark입니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-055 요약을 추가하고 D-034 하위 페이지를 생성했으며, D-034 fetch와 Phase 4 검색으로 반영을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이고 D-034 URL은 `https://app.notion.com/p/38f05ea68bfc81918247f116dc0fc601`입니다.
+- Git 동기화는 1차 커밋과 원격 push 후 완료 커밋으로 반영 예정입니다.
