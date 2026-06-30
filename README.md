@@ -136,8 +136,10 @@ P4-19에서는 제출 패키징을 검증했습니다.
 - 제출 ZIP 구조 검증 통과
 - 제출 ZIP 내부 경로 기준 대표 fixture 실행 통과
 - 제출 ZIP 내부 실행 결과의 schema, evidence, claim marker, 민감정보 잔존 검사 통과
+- 임시 로컬 marketplace `openbell-guard-local` 구성 및 `openbell-guard@openbell-guard-local` 설치 확인
+- 새 Codex 비대화 세션에서 `openbell-guard` Skill 사용 가능 응답 확인
 
-새 Codex 앱 세션에서 UI 기반 설치와 신뢰 승인까지 자동화해 확인하지는 못했습니다. 현재 제출물은 공식 구조 검증과 패키지 내부 실행 검증으로 재현 가능성을 확인했습니다.
+새 Codex UI 화면에서 사람이 직접 클릭해 확인하는 과정까지 자동화하지는 못했습니다. 대신 Codex CLI marketplace 설치, plugin list의 `installed, enabled` 상태, 새 Codex 비대화 세션의 Skill 인식 응답으로 재현 가능성을 확인했습니다.
 
 ## 수동 테스트 예제
 

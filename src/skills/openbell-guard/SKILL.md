@@ -25,6 +25,7 @@ OpenBell Guard는 카카오페이증권 AX 해커톤 제출물을 위한 Codex S
 - CLI는 `analysis.json` 구조, evidence 참조, confirmed_fact 근거, 보고서 claim marker, 민감정보 잔존 여부를 자체 검증해 `output-validation.json`을 생성합니다.
 - benchmark CLI는 합성 지원 한도 번들을 생성하고 1회 준비 실행 후 5회 측정 실행으로 M-016 실행시간 중앙값과 M-017 Python 추적 메모리 최고값을 기록합니다.
 - 제출 패키징 도구는 프로젝트 루트의 `README.md`, `src/`, `logs/`를 `submission.zip`으로 묶고, 필수 파일·금지 폴더·로그 형식을 검사합니다.
+- P4-19 보강 검증에서는 임시 로컬 Codex marketplace `openbell-guard-local`에 플러그인을 등록하고, `openbell-guard@openbell-guard-local` 설치 상태와 새 Codex 비대화 세션의 Skill 인식을 확인했습니다.
 
 ## 실행 예시
 
@@ -148,6 +149,6 @@ python src/skills/openbell-guard/scripts/benchmark_openbell.py --output out/p4-1
 
 ## Phase 4 완료 상태와 다음 범위
 
-P4-19 기준으로 자동화 가능한 제출 패키징 검증은 완료됐습니다. 별도 새 Codex 앱 세션에서 UI 기반 설치와 신뢰 승인을 직접 확인하는 절차는 최종 제출 전 수동 확인 후보입니다.
+P4-19 기준으로 자동화 가능한 제출 패키징 검증은 완료됐습니다. 임시 로컬 Codex marketplace 등록, `openbell-guard@openbell-guard-local` 설치, 새 Codex 비대화 세션의 Skill 인식까지 확인했습니다. 다만 별도 새 Codex 앱 UI에서 사람이 직접 플러그인 카드와 신뢰 승인 화면을 클릭해 확인하는 절차는 최종 제출 전 수동 확인 후보입니다.
 
 다음 개발 후보는 Phase 5 합성 시나리오·자동 검증 확장 또는 Phase 6 최종 제출 점검입니다.

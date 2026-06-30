@@ -1422,3 +1422,49 @@ P4-19에서 OpenBell Guard를 해커톤 제출 가능한 `submission.zip` 형태
 - Codex CLI가 로컬 플러그인 경로 설치와 신뢰 승인 자동화 명령을 공식 제공할 때
 - 로그 파일을 Git에 올려야 하는 별도 요구가 생길 때
 - 제출 ZIP 내부에서 실행 필수 파일 누락이 새로 발견될 때
+
+### D-040 · Codex 설치 검증은 임시 로컬 marketplace와 새 비대화 세션 인식으로 수행한다
+
+**상황**
+
+P4-19 패키징 검증 이후, 제출 전 새 Codex UI 설치 확인을 어느 수준까지 자동화할지 결정해야 했습니다. OpenBell Guard는 일반 공개 marketplace에 등록된 플러그인이 아니며, 현재 저장소의 제출 루트는 `src/`입니다. 따라서 실제 설치 검증을 하려면 Codex가 인식할 수 있는 marketplace 구성을 별도로 제공해야 했습니다.
+
+**검토한 선택지**
+
+1. 실제 새 Codex UI에서만 수동 확인합니다.
+   - 장점: 사람이 보는 설치 화면과 가장 가깝습니다.
+   - 단점: 현재 자동화 기록과 재현 가능한 명령 결과를 남기기 어렵고, 대화형 UI 클릭 과정은 현재 세션에서 직접 검증하기 어렵습니다.
+2. 전역 개인 marketplace를 직접 구성합니다.
+   - 장점: 사용자 환경에서 계속 재사용할 수 있습니다.
+   - 단점: 사용자 전역 설정을 장기적으로 바꿀 수 있고, 프로젝트 제출물과 개인 설정의 경계가 흐려질 수 있습니다.
+3. `out/` 아래 임시 로컬 marketplace를 만들고 Codex CLI로 등록·설치·새 세션 인식을 확인합니다.
+   - 장점: 원본 `src/`, Git 추적 대상, 제출 ZIP을 오염시키지 않으면서 설치 가능성과 새 세션 발견성을 명령 결과로 검증할 수 있습니다.
+   - 단점: 사람이 UI에서 플러그인 카드와 신뢰 승인 화면을 직접 클릭한 확인은 별도 수동 후보로 남습니다.
+
+**결정**
+
+- 선택지 3을 채택합니다.
+- `out/codex-marketplace-check/` 아래 임시 marketplace를 만들고, `openbell-guard-local` marketplace에 `openbell-guard`를 노출합니다.
+- Codex CLI로 `openbell-guard@openbell-guard-local` 설치와 `installed, enabled` 상태를 확인합니다.
+- 새 Codex 비대화 세션에서 `openbell-guard` Skill 사용 가능 응답을 확인합니다.
+- 캐시 재설치가 필요할 때는 스테이징 복사본에만 cachebuster 버전을 적용하고, 제출용 `src/.codex-plugin/plugin.json` 버전은 `0.1.0`으로 유지합니다.
+- 새 Codex 앱 UI의 클릭 기반 신뢰 승인 확인은 자동화 검증 범위 밖의 수동 확인 후보로 명시합니다.
+
+**근거**
+
+- `plugin-creator`의 marketplace 설치 흐름은 marketplace JSON을 통해 플러그인을 등록하고, 기존 로컬 설치 갱신에는 cachebuster 적용을 권장합니다.
+- `out/`은 Git 무시 대상이므로 임시 marketplace 스테이징과 설치 실험 결과가 제출 ZIP이나 저장소 추적 파일을 오염시키지 않습니다.
+- 실제 검증에서 `codex plugin marketplace add`, `codex plugin add`, `codex plugin list`, `codex exec --ephemeral`이 모두 성공했고, 새 비대화 세션에서 `AVAILABLE` 응답을 받았습니다.
+- 최초 설치 확인 중 발견된 `interface.defaultPrompt` 128자 제한 경고는 최종 제출용 manifest에서 짧은 starter prompt 배열로 수정했습니다.
+
+**영향**
+
+- P4-19 보고서와 README는 이제 “새 Codex UI를 전혀 확인하지 못했다”가 아니라 “CLI marketplace 설치와 새 비대화 세션 인식은 확인했고, UI 클릭 기반 신뢰 승인은 수동 후보”라고 설명합니다.
+- `submission.zip` 내부 manifest는 `defaultPrompt` 제한을 충족합니다.
+- 사용자 전역 Codex 설정에는 `openbell-guard-local` marketplace와 플러그인 설치 상태가 남아 있을 수 있으므로, 필요하면 후속 작업에서 `codex plugin marketplace remove openbell-guard-local`로 정리할 수 있습니다.
+
+**추가 재검토 조건**
+
+- Codex 앱이 로컬 플러그인 UI 설치를 자동화하거나 검증하는 공식 명령을 제공할 때
+- 심사 지침이 반드시 사람이 새 Codex UI에서 플러그인 카드와 신뢰 승인 화면을 캡처해야 한다고 요구할 때
+- 최종 제출 전에 사용자 환경에서 marketplace 등록 상태를 정리해야 할 때

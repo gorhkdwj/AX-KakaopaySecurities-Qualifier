@@ -17,6 +17,10 @@
       "Analyze synthetic or anonymized incident bundles",
       "Draft evidence-backed incident report summaries"
     ],
-    "defaultPrompt": "Use OpenBell Guard to analyze a synthetic or anonymized brokerage incident bundle. Do not read or expose raw secrets, customer data, or account data. Rely on validated outputs and separate confirmed facts, hypotheses, and unknowns."
+    "defaultPrompt": [
+      "Analyze a synthetic incident bundle with OpenBell Guard.",
+      "Explain OpenBell Guard outputs without exposing raw secrets.",
+      "Check path-specific degradation using validated outputs."
+    ]
   }
 }

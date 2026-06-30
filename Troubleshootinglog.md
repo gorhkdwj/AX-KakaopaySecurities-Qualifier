@@ -797,3 +797,63 @@
 
 - Notion 검색 도구를 사용할 때 `max_highlight_length`는 500 이하로 설정합니다.
 - 정확한 문구 검증이 필요하면 검색 하이라이트에만 의존하지 말고, 생성·업데이트 도구의 성공 응답과 대상 페이지 재조회 결과를 함께 확인합니다.
+
+### T-026 · `interface.defaultPrompt` 128자 제한 초과로 Codex가 prompt를 무시한 문제
+
+**발생 단계**
+
+- Phase/P4 단계: Phase 4 / P4-19 Codex marketplace 설치 검증 보강
+- 관련 W-ID: W-077
+
+**증상**
+
+- 임시 로컬 marketplace에서 `openbell-guard@openbell-guard-local`을 설치한 뒤 새 Codex 비대화 세션을 실행했습니다.
+- 세션 시작 로그에서 OpenBell Guard의 `interface.defaultPrompt`가 128자를 초과해 무시된다는 경고가 표시됐습니다.
+- 플러그인 자체는 설치·인식됐지만, starter prompt가 정상 노출되지 않을 수 있는 상태였습니다.
+
+**확인한 원인**
+
+- `src/.codex-plugin/plugin.json`의 `interface.defaultPrompt`가 긴 단일 문자열이었습니다.
+- 현재 Codex plugin manifest 검증과 런타임은 default prompt 항목별 128자 제한을 적용합니다.
+
+**조치**
+
+- `src/.codex-plugin/plugin.json`의 `defaultPrompt`를 짧은 starter prompt 3개 배열로 변경했습니다.
+- 각 prompt 길이는 `[56, 60, 56]`자로 제한 안에 들어오도록 확인했습니다.
+- 스테이징 marketplace 복사본에도 같은 수정사항을 반영하고 cachebuster 버전으로 재설치했습니다.
+- 공식 plugin validator와 새 Codex 비대화 세션 인식 검증을 다시 실행했습니다.
+
+**재발 방지·후속 조치**
+
+- `plugin.json`의 `interface.defaultPrompt`는 긴 설명문이 아니라 짧은 starter prompt 배열로 작성합니다.
+- marketplace 설치 검증 후 Codex 시작 경고를 반드시 확인합니다.
+- manifest를 수정하면 `validate_plugin.py`, ZIP 내부 manifest 점검, 새 세션 인식 확인을 함께 수행합니다.
+
+### T-027 · PowerShell 파이프 기반 Python 검증에서 한글 리터럴 검색이 다시 실패한 문제
+
+**발생 단계**
+
+- Phase/P4 단계: Phase 4 / P4-19 제출 ZIP README 반영 확인
+- 관련 W-ID: W-077
+- 관련 기존 항목: T-023
+
+**증상**
+
+- `submission.zip` 내부 `README.md`에 marketplace 검증 문구가 들어갔는지 Python 임시 스크립트로 확인했습니다.
+- ZIP 내부 README를 UTF-8로 정상 디코딩해 일부 내용을 출력하면 문구가 보였지만, 같은 스크립트 안의 한글 리터럴 포함 여부 검사는 `False`를 반환했습니다.
+
+**확인한 원인**
+
+- PowerShell here-string을 `python -`으로 파이프할 때, 임시 Python 코드 안의 한글 문자열 리터럴이 콘솔 인코딩 영향을 받아 예상과 다르게 전달될 수 있습니다.
+- 파일 내용 자체의 UTF-8 문제는 아니었고, 검증 스크립트 작성 방식 문제였습니다.
+
+**조치**
+
+- 한글 리터럴 대신 `openbell-guard-local`, `installed, enabled`, `openbell-guard` 같은 ASCII marker로 ZIP 내부 README와 Skill 반영 여부를 확인했습니다.
+- 필요한 경우 `unicode_escape` 출력으로 실제 파일 내용을 확인했습니다.
+
+**재발 방지·후속 조치**
+
+- Windows PowerShell에서 ZIP·Markdown 문구 자동 검증을 할 때는 가능하면 ASCII marker를 사용합니다.
+- 반드시 한글 문구를 검사해야 하면 Python 코드를 파일로 저장하거나 `python -X utf8`과 `unicode_escape` 기반 확인을 사용합니다.
+- T-023의 교훈을 반복 적용해야 하며, PowerShell 파이프 안에 한글 리터럴을 직접 넣는 방식은 기본 검증 경로로 쓰지 않습니다.

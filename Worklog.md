@@ -3424,3 +3424,94 @@
 - 다음 답변에서 marketplace 구성, 설치 확인, 새 Codex UI 검증, 정리, ZIP 재생성·검증 순서를 제안합니다.
 - 중요한 새 결정은 아직 없어 Decisionlog는 추가하지 않았습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-076 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+
+### W-077 · 임시 Codex marketplace 설치 검증과 제출 ZIP 재패키징
+
+**요청**
+
+- 앞서 설명한 marketplace 구성·설치 검증·README 반영·ZIP 재생성 절차를 실제로 진행합니다.
+
+**수행 작업**
+
+- `plugin-creator` Skill의 설치·marketplace·manifest 참고 문서를 확인했습니다.
+- `out/codex-marketplace-check/` 아래에 임시 로컬 marketplace를 만들고 `src/` 플러그인 복사본을 배치했습니다.
+- `openbell-guard-local` marketplace를 Codex CLI에 등록하고 `openbell-guard@openbell-guard-local` 플러그인을 설치했습니다.
+- 새 Codex 비대화 세션에서 `openbell-guard` Skill이 사용 가능하다는 응답을 확인했습니다.
+- 최초 새 세션 확인 과정에서 `interface.defaultPrompt`가 128자 제한을 넘어 무시된다는 경고를 발견했습니다.
+- `src/.codex-plugin/plugin.json`의 `defaultPrompt`를 짧은 starter prompt 3개 배열로 수정했습니다.
+- 스테이징 marketplace 복사본에는 cachebuster 버전 `0.1.0+codex.20260630084148`을 적용해 Codex 캐시 재설치를 확인했습니다. 제출용 `src` manifest 버전은 `0.1.0`으로 유지했습니다.
+- `README.md`, `docs/p4-19-packaging-report.md`, `docs/README.md`, `src/skills/openbell-guard/SKILL.md`에 marketplace 설치 검증 결과와 UI 클릭 검증 한계를 반영했습니다.
+- `submission.zip`을 재생성하고 ZIP 내부 README, Skill, manifest와 대표 fixture 실행을 다시 검증했습니다.
+
+**변경 파일**
+
+- 수정: `README.md`
+- 수정: `docs/README.md`
+- 수정: `docs/p4-19-packaging-report.md`
+- 수정: `src/.codex-plugin/plugin.json`
+- 수정: `src/skills/openbell-guard/SKILL.md`
+- 수정: `Worklog.md`
+- 수정: `Decisionlog.md`
+- 수정: `Troubleshootinglog.md`
+- 재생성: `submission.zip`과 `submission/` 출력물
+- 생성·갱신: `out/codex-marketplace-check/`, `out/p4-19-submission-smoke-marketplace-final2/`
+
+**검증**
+
+- `python "C:\Users\gorhk\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py" .\src`
+  - `Plugin validation passed`
+- `python -X utf8 "C:\Users\gorhk\.codex\skills\.system\skill-creator\scripts\quick_validate.py" .\src\skills\openbell-guard`
+  - `Skill is valid!`
+- `python .\tools\preflight_check.py --quiet`
+  - `SUMMARY ok=5 warn=0 error=0`
+- `python -m pytest src\tests`
+  - `68 passed`
+- `codex plugin marketplace add .\out\codex-marketplace-check --json`
+  - `openbell-guard-local` 등록 확인
+- `codex plugin add openbell-guard@openbell-guard-local --json`
+  - `installedPath`가 Codex plugin cache 아래에 생성됨
+  - 재설치 후 버전 `0.1.0+codex.20260630084148` 확인
+- `codex plugin list`
+  - `openbell-guard@openbell-guard-local`이 `installed, enabled` 상태로 표시됨
+- `codex exec --ephemeral -s read-only -C . "..."`
+  - 새 Codex 비대화 세션에서 `AVAILABLE` 응답과 Skill 용도 설명 확인
+- `python .\tools\build_submission.py`
+  - `zip_file_count: 22`, `log_file_count: 1`, `status: built`
+- `python .\tools\validate_submission.py .\submission.zip`
+  - `status: passed`
+- ZIP 내부 점검
+  - `zip_readme_has_marketplace_id=True`
+  - `zip_skill_has_marketplace_id=True`
+  - `zip_manifest_version=0.1.0`
+  - `zip_default_prompt_type=list`
+  - `zip_default_prompt_count=3`
+  - `zip_default_prompt_lengths=[56, 60, 56]`
+- `python .\submission\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\submission\src\tests\fixtures\domestic-market-open-min\bundle --output .\out\p4-19-submission-smoke-marketplace-final2`
+  - exit code 0
+  - `run_status=report_validated`
+  - `output_validation.status=passed`
+  - `raw_excerpts_emitted=false`
+- `python .\submission\src\skills\openbell-guard\scripts\validate_bundle.py --output .\out\p4-19-submission-smoke-marketplace-final2`
+  - `status=passed`
+  - `fatal=0`
+  - `secret_residue=passed`
+- `git diff --check`
+  - whitespace 오류 없음
+
+**트러블슈팅**
+
+- T-026: `interface.defaultPrompt` 128자 제한 초과 경고를 발견하고 짧은 starter prompt 배열로 수정했습니다.
+- T-027: ZIP README 검증 중 PowerShell 파이프의 한글 리터럴 검색이 다시 불안정해 ASCII marker 기준으로 확인했습니다.
+
+**판단 근거**
+
+- 실제 새 Codex 앱 UI에서 사람이 클릭해 신뢰 승인 화면까지 확인하는 절차는 현재 자동화하지 못했지만, Codex CLI marketplace 등록·설치, plugin list 상태, 새 Codex 비대화 세션의 Skill 인식으로 자동화 가능한 발견성과 설치 가능성을 검증했습니다.
+- 임시 marketplace를 `out/` 아래에 둔 것은 Git 추적·제출 ZIP·원본 `src/` 구조를 오염시키지 않고 Codex 설치 검증만 수행하기 위한 선택입니다.
+- 제출용 manifest 버전은 `0.1.0`으로 유지하고, 스테이징 복사본에만 cachebuster를 적용해 최종 제출물과 로컬 설치 캐시 갱신 목적을 분리했습니다.
+
+**결과**
+
+- OpenBell Guard는 임시 Codex marketplace 경로에서 설치 가능하고 새 Codex 비대화 세션에서 Skill로 인식됨을 확인했습니다.
+- 제출용 `submission.zip`은 README·Skill·manifest 수정사항을 반영한 상태로 재생성됐고 구조·실행·출력 검증이 모두 통과했습니다.
+- 새 Codex 앱 UI의 클릭 기반 신뢰 승인 확인은 여전히 수동 확인 후보로 남습니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-077 요약을 추가하고, D-040 결정 페이지를 생성했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이며 D-040 URL은 `https://app.notion.com/p/38f05ea68bfc81458581f64d0f3a5edc`입니다.

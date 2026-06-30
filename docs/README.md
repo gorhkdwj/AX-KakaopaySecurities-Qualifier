@@ -19,7 +19,7 @@
 6. [P4-18 성능·회귀 benchmark 결과](./p4-18-benchmark-report.md)  
    지원 한도 합성 입력에서 M-016 실행시간과 M-017 Python 추적 메모리를 측정한 결과와 경량화 조치를 설명합니다.
 7. [P4-19 설치·호출·제출 패키징 검증 보고서](./p4-19-packaging-report.md)
-   제출 ZIP 생성, 공식 플러그인·Skill 검증, ZIP 구조 검사, 제출 경로 기준 실행 검증 결과와 새 Codex 세션 설치 확인의 한계를 설명합니다.
+   제출 ZIP 생성, 공식 플러그인·Skill 검증, ZIP 구조 검사, 제출 경로 기준 실행 검증, 임시 Codex marketplace 설치 확인과 새 세션 인식 결과를 설명합니다.
 8. [P4-14~P4-18 제출 전 검토 보고서](./p4-14-to-p4-18-review-report.md)
    비전공자 초급자도 이해할 수 있도록 P4-14~P4-18 핵심 결과물, 검증 의미, 한계와 P4-19 전 확인사항을 통합 설명합니다.
 9. [수동 테스트·휴먼 리뷰 안내](./manual-test-reports/README.md)
@@ -59,7 +59,7 @@
 - `phase4-implementation-sequence.md`는 실제 코드를 만들 순서와 각 단계의 검증·유의점·관련 M-ID·issue code, 단계 완료 보고 형식을 연결한 실행 계획입니다.
 - `p4-17-scenario-matrix.md`는 A~H 합성 시나리오와 통합 테스트의 기대 결과를 설명합니다.
 - `p4-18-benchmark-report.md`는 합성 지원 한도 입력의 실행시간·Python 추적 메모리 benchmark와 출력 경량화 조치를 설명합니다.
-- `p4-19-packaging-report.md`는 제출 ZIP 생성과 검증, 패키지 내부 실행 결과, 새 Codex 세션 설치 확인의 한계를 설명합니다.
+- `p4-19-packaging-report.md`는 제출 ZIP 생성과 검증, 패키지 내부 실행 결과, 임시 Codex marketplace 설치 확인, 새 Codex 비대화 세션 인식 결과와 UI 클릭 검증 한계를 설명합니다.
 - `p4-14-to-p4-18-review-report.md`는 P4-19 전에 사용자가 읽고 검토할 수 있도록 핵심 결과물과 검증 의미를 통합 설명합니다.
 - `manual-test-reports/`는 사용자가 직접 실행한 더미 데이터 테스트의 위치, 결과 요약과 휴먼 리뷰 체크리스트를 보관합니다.
 - 루트 `Troubleshootinglog.md`는 구현 중 실제로 발생한 문제와 해결 과정을 누적하는 별도 기록입니다.
