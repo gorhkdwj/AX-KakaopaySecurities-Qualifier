@@ -2806,3 +2806,85 @@
 
 - 다음 대규모 케이스 `case-002-large-scenario`는 현실형 노이즈와 경계상황을 포함하는 방향으로 설계합니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-064 요약을 추가했고, D-037 결정 페이지를 생성했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이며 D-037 URL은 `https://app.notion.com/p/38f05ea68bfc81b6bd82ca22ce8b82d5`입니다.
+
+### W-065 · case-002 대규모 현실형 합성 데이터 생성·분석·검증
+
+**요청**
+
+- 합성데이터 생성부터 결과 검증까지 쭉 진행합니다.
+- 앞서 정한 원칙대로 너무 뻔한 로그가 아니라 실무에서 발생할 수 있는 노이즈와 경계 상황을 포함합니다.
+
+**수행 작업**
+
+- `tools/generate_large_scenario.py`를 추가해 `case-002-large-scenario` 생성기를 구현했습니다.
+- seed `20260630`으로 로그 60,000행과 메트릭 20,000행을 생성했습니다.
+- 생성 결과를 `out/manual-tests/case-002-large-scenario/bundle/`에 저장했습니다.
+- 기대 정답을 bundle 내부가 아니라 `out/manual-tests/case-002-large-scenario/ground-truth.json`에 분리했습니다.
+- OpenBell Guard CLI를 실행해 `out/manual-tests/case-002-large-scenario/result/`에 결과를 생성했습니다.
+- 독립 validator와 ground truth 대조, 민감정보 원문 잔존 검색을 실행했습니다.
+- `docs/manual-test-reports/case-002-large-scenario.md`를 작성하고 `docs/manual-test-reports/README.md`에 연결했습니다.
+
+**변경 파일**
+
+- 추가: `tools/generate_large_scenario.py`
+- 추가: `docs/manual-test-reports/case-002-large-scenario.md`
+- 수정: `docs/manual-test-reports/README.md`
+- 수정: `Worklog.md`
+- 수정 예정: `Troubleshootinglog.md`
+- 로컬 생성: `out/manual-tests/case-002-large-scenario/bundle/`
+- 로컬 생성: `out/manual-tests/case-002-large-scenario/result/`
+- 로컬 생성: `out/manual-tests/case-002-large-scenario/ground-truth.json`
+- 로컬 생성: `out/manual-tests/case-002-large-scenario/generation-summary.md`
+
+**검증**
+
+- `python .\tools\generate_large_scenario.py --output .\out\manual-tests\case-002-large-scenario --seed 20260630 --log-records 60000 --metric-records 20000`
+  - exit code 0
+  - 로그 60,000행, 메트릭 20,000행, 마스킹 검증용 가짜 민감정보 삽입 행 4개 생성
+- `python .\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\out\manual-tests\case-002-large-scenario\bundle --output .\out\manual-tests\case-002-large-scenario\result`
+  - exit code 0
+  - `run_status=report_validated`
+  - accepted rows: `logs.jsonl` 60,000건, `metrics.csv` 20,000건, total 80,000건
+  - bucket count 60, breach bucket 7, healthy bucket 53
+  - `market_data`, `watchlist_info`는 `outage_detected`, `order_execution`은 `healthy`
+- `python .\src\skills\openbell-guard\scripts\validate_bundle.py --output .\out\manual-tests\case-002-large-scenario\result`
+  - exit code 0
+  - `status=passed`
+  - `analysis_schema`, `confirmed_fact_evidence`, `evidence_references`, `report_claim_refs`, `secret_residue` 모두 통과
+- ground truth 대조
+  - `market_data`: 기대 상태·장애 시작·회복 시각 모두 일치
+  - `watchlist_info`: 기대 상태·장애 시작·회복 시각 모두 일치
+  - `order_execution`: 기대 정상 상태 일치
+- 결과 폴더 민감정보 원문 검색
+  - `case002BearerToken`, `case002SyntheticKey`, `analyst@example.com`, `010-2222-3333`, `999-888-777666` 검색 결과 히트 없음
+- `python -m py_compile tools\generate_large_scenario.py`
+  - 통과
+- `python .\tools\preflight_check.py`
+  - `SUMMARY ok=5 warn=0 error=0`
+- `python -m pytest src\tests`
+  - 1차 검증: 68 passed in 14.15s
+  - 커밋 전 최종 검증: 68 passed in 13.69s
+- `git diff --check`
+  - exit code 0
+  - CRLF 변환 안내만 표시됨
+- `git status --short --ignored`
+  - 변경 파일은 추적 대상 문서·생성기·기록 파일입니다.
+  - `out/`은 Git 무시 대상으로 남아 있음을 확인했습니다.
+
+**트러블슈팅**
+
+- T-021: 첫 실행에서 `service-map.json`의 dependency가 같은 파일 안의 서비스만 참조해야 한다는 `INP009_SERVICE_MAP` 오류가 발생했습니다. 외부 피드 참조를 제거하고 `dependency_type=exchange`와 로그 메시지로 외부 의존성 신호를 표현하도록 수정했습니다.
+- T-022: ground truth 대조용 임시 Python 명령을 Bash heredoc으로 실행해 PowerShell 문법 오류가 발생했습니다. PowerShell here-string 방식으로 재실행해 통과했습니다.
+
+**판단 근거**
+
+- 대규모 검증은 단순 성능 benchmark와 달리 정상 노이즈, 장애 신호, 회복 구간, 임계값 경계를 함께 포함해야 탐지 안정성을 확인할 수 있습니다.
+- 기대 정답을 입력 bundle 내부에 넣지 않고 별도 `ground-truth.json`에 둬 플러그인이 정답을 읽는 구조를 피했습니다.
+- `out/`은 Git 무시 대상이므로 대용량 원본과 실행 결과는 로컬에 보존하고, 생성기와 요약 보고서만 Git 추적 대상으로 둡니다.
+
+**결과**
+
+- `case-002-large-scenario`의 대규모 합성 데이터 생성·분석·검증이 완료되었습니다.
+- 결과는 기대 정답과 일치했고, validator와 민감정보 잔존 검색도 통과했습니다.
+- 중요한 새 아키텍처 결정은 D-037 범위 안에 있으므로 Decisionlog는 추가하지 않았습니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-065 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.

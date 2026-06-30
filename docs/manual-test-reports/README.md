@@ -16,6 +16,7 @@
 | 케이스 ID | 목적 | 입력 | 결과 | 휴먼 리뷰 |
 | --- | --- | --- | --- | --- |
 | `case-001-market-open-watchlist-review` | 국내장 개장 직후 시세·관심종목 경로만 악화되고 주문 경로는 정상인 상황을 부분 장애로 판정하는지 확인 | `out/manual-tests/case-001-market-open-watchlist-review/bundle/` | `out/manual-tests/case-001-market-open-watchlist-review/result/` | [case-001 보고서](./case-001-market-open-watchlist-review.md) |
+| `case-002-large-scenario` | 80,000행 규모의 현실형 합성 데이터에서 장애 경로와 정상 주문 경로를 안정적으로 분리하는지 확인 | `out/manual-tests/case-002-large-scenario/bundle/` | `out/manual-tests/case-002-large-scenario/result/` | [case-002 보고서](./case-002-large-scenario.md) |
 
 ## 대규모 합성 로그 설계 원칙
 
@@ -43,6 +44,14 @@
 ```powershell
 python .\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\out\manual-tests\case-001-market-open-watchlist-review\bundle --output .\out\manual-tests\case-001-market-open-watchlist-review\result
 python .\src\skills\openbell-guard\scripts\validate_bundle.py --output .\out\manual-tests\case-001-market-open-watchlist-review\result
+```
+
+대규모 case-002는 먼저 생성기를 실행한 뒤 분석합니다.
+
+```powershell
+python .\tools\generate_large_scenario.py --output .\out\manual-tests\case-002-large-scenario --seed 20260630 --log-records 60000 --metric-records 20000
+python .\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\out\manual-tests\case-002-large-scenario\bundle --output .\out\manual-tests\case-002-large-scenario\result
+python .\src\skills\openbell-guard\scripts\validate_bundle.py --output .\out\manual-tests\case-002-large-scenario\result
 ```
 
 ## 휴먼 리뷰 기준

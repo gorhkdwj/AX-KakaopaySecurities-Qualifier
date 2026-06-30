@@ -660,3 +660,60 @@
 
 - 새 Markdown 목록을 추가할 때 줄 끝 공백 두 칸에 의존하지 말고, 가능한 일반 줄바꿈과 들여쓰기로 설명을 연결합니다.
 - 커밋 전 `git diff --check`를 실행해 공백·충돌 marker 문제를 확인합니다.
+
+### T-021 · case-002 service-map dependency가 같은 파일 안의 서비스만 참조해야 하는 계약을 위반한 문제
+
+**발생 단계**
+
+- Phase/P4 단계: Phase 4 / case-002 대규모 현실형 합성 데이터 검증
+- 관련 W-ID: W-065
+
+**증상**
+
+- `case-002-large-scenario` 첫 분석 실행에서 `run_openbell.py`가 exit code 2로 중단됐습니다.
+- 오류는 `INP009_SERVICE_MAP`이며, 메시지는 `service-map.json dependencies must reference services in the same file.`였습니다.
+
+**확인한 원인**
+
+- 생성기에서 외부 시세 피드처럼 보이는 신호를 만들기 위해 `quote-provider-adapter`의 dependency에 `synthetic-exchange-feed`를 넣었습니다.
+- 현재 OpenBell Guard 입력 계약은 `service-map.json`의 `dependencies`가 같은 파일에 정의된 서비스명만 참조하도록 요구합니다.
+- 따라서 외부 의존성 자체를 service-map dependency로 표현하는 방식은 현재 계약과 맞지 않았습니다.
+
+**조치**
+
+- `tools/generate_large_scenario.py`에서 `synthetic-exchange-feed` dependency를 제거했습니다.
+- 외부 의존성 성격은 `dependency_type=exchange`와 로그 메시지 패턴으로 표현하도록 유지했습니다.
+- bundle을 다시 생성한 뒤 분석 실행과 validator를 재실행해 통과를 확인했습니다.
+
+**재발 방지·후속 조치**
+
+- 합성 service-map을 만들 때 dependencies는 반드시 같은 파일 안의 service_name만 참조합니다.
+- 외부 의존성 신호는 현재 계약에서는 `dependency_type`과 telemetry message, evidence 요약으로 표현합니다.
+- 향후 실제 외부 시스템명을 별도 노드로 표현하려면 service-map 계약 변경부터 검토해야 합니다.
+
+### T-022 · PowerShell에서 Bash heredoc 문법으로 ground truth 대조 스크립트를 실행한 문제
+
+**발생 단계**
+
+- Phase/P4 단계: Phase 4 / case-002 대규모 현실형 합성 데이터 검증
+- 관련 W-ID: W-065
+
+**증상**
+
+- ground truth 대조용 임시 Python 스크립트를 `python - <<'PY'` 형태로 실행했다가 PowerShell parser 오류가 발생했습니다.
+- 오류는 `Missing file specification after redirection operator`와 `The '<' operator is reserved for future use.`였습니다.
+
+**확인한 원인**
+
+- `python - <<'PY'`는 Bash 계열 heredoc 문법입니다.
+- 현재 작업 셸은 PowerShell이므로 here-string `@' ... '@ | python -` 형태를 사용해야 합니다.
+
+**조치**
+
+- 같은 Python 코드를 PowerShell here-string 방식으로 재실행했습니다.
+- ground truth 대조 결과 3개 서비스 경로의 기대 상태, 장애 시작, 회복 시각이 모두 실제 결과와 일치했습니다.
+
+**재발 방지·후속 조치**
+
+- Windows PowerShell에서 inline Python을 실행할 때는 `@' ... '@ | python -`를 사용합니다.
+- Bash heredoc 문법은 이 프로젝트의 기본 셸 명령 예시로 사용하지 않습니다.
