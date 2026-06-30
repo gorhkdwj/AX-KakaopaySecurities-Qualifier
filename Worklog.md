@@ -3549,3 +3549,44 @@
 - 해당 멘션은 설치된 OpenBell Guard 플러그인을 가리키는 호출·참조 문법으로 보면 됩니다.
 - 이번 응답에서는 플러그인 실행을 하지 않았습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-078 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+
+### W-079 · 플러그인 등록·호출 검증 상태와 제출 ZIP 재현성 설명
+
+**요청**
+
+- 현재 플러그인 등록 및 호출까지 모두 진행된 것인지, 이 구조가 제출용 ZIP 파일을 통해서도 가능한지 확인합니다.
+
+**수행 작업**
+
+- 실제 플러그인 실행이나 추가 CLI 검증은 하지 않았습니다.
+- 직전 P4-19 보강 검증 결과를 바탕으로 등록, 설치, 새 세션 인식, 제출 ZIP 실행 가능성의 범위를 구분해 설명했습니다.
+
+**변경 파일**
+
+- 수정: `Worklog.md`
+
+**검증**
+
+- 새 검증 명령은 실행하지 않았습니다.
+- 근거로 사용한 기존 검증 결과:
+  - `openbell-guard-local` 임시 marketplace 등록 완료
+  - `openbell-guard@openbell-guard-local` 설치 및 `installed, enabled` 상태 확인
+  - 새 Codex 비대화 세션에서 `AVAILABLE` 응답 확인
+  - `submission.zip` 내부 구조 검증, 대표 fixture 실행, 출력 검증 통과
+
+**트러블슈팅**
+
+- 새 오류는 없었습니다.
+
+**판단 근거**
+
+- `plugin://openbell-guard@openbell-guard-local`은 현재 로컬 Codex 환경의 marketplace 설치 상태를 가리키는 URI입니다.
+- 제출 ZIP에는 임시 marketplace 등록 상태 자체가 포함되지 않으며, 제출 ZIP 안의 `src/`가 실제 플러그인 루트입니다.
+- 따라서 심사 환경에서는 ZIP을 풀고 `src/.codex-plugin/plugin.json`이 있는 `src/`를 플러그인 루트로 인식·설치해야 같은 기능을 사용할 수 있습니다.
+
+**결과**
+
+- 로컬 환경 기준 등록·설치·새 세션 인식까지는 완료됐습니다.
+- 제출 ZIP 기준으로도 플러그인 구조와 실행 코드는 포함되어 있고, ZIP 내부 경로 실행 검증은 통과했습니다.
+- 다만 `openbell-guard-local` marketplace 등록 자체가 ZIP에 자동 포함되는 것은 아니므로, 제출 ZIP 사용자는 `src/`를 플러그인 루트로 설치·인식해야 합니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-079 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
