@@ -2689,3 +2689,8 @@
 - pytest 의존성 부재는 T-019로 기록했고, 사용자 요청에 따라 설치 후 전체 회귀 테스트 통과까지 확인했습니다.
 - 커밋 전 `git diff --check`의 trailing whitespace 실패는 T-020으로 기록하고 수정했습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-061 요약을 추가했고, D-036 결정 페이지를 생성했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이며 D-036 URL은 `https://app.notion.com/p/38f05ea68bfc81f58371e5495143ad2e`입니다.
+
+### W-061 Git 동기화 메모
+
+- 수동 테스트 휴먼 리뷰 문서, dev 검증 의존성, W-061/D-036/T-019/T-020 기록을 커밋 `b2facf2`로 원격 `origin/main`에 push했습니다.
+- `out/manual-tests/case-001-market-open-watchlist-review/` 하위 합성 입력과 실행 결과는 로컬 보존 대상이며 `.gitignore`에 의해 원격에는 포함되지 않았습니다.
