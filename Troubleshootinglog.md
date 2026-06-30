@@ -744,3 +744,29 @@
 
 - Windows PowerShell에서 한글 섹션명 존재 여부를 검사할 때는 간단한 경우 `Select-String`을 우선 사용합니다.
 - Python 임시 스크립트에 한글 리터럴을 넣어야 한다면 `python -X utf8` 또는 코드포인트·ASCII 기반 검사를 사용합니다.
+
+### T-024 · PowerShell `Select-Object -Index 450..525` 범위 문법 오사용
+
+**발생 단계**
+
+- Phase/P4 단계: Phase 4 / case-003 추가 필요성 검토
+- 관련 W-ID: W-070
+
+**증상**
+
+- 기획서 검증 계획 일부 줄을 확인하려고 `Get-Content ... | Select-Object -Index 450..525`를 실행했으나 PowerShell 매개변수 변환 오류가 발생했습니다.
+- 오류는 `Cannot convert value "450..525" to type "System.Int32"`였습니다.
+
+**확인한 원인**
+
+- PowerShell에서 `Select-Object -Index`는 정수 배열을 받을 수 있지만, 명령 인자 위치에서 `450..525`가 의도한 배열로 전달되지 않았습니다.
+- 이 프로젝트의 기본 셸은 PowerShell이므로 범위 선택 시 먼저 변수에 라인을 담고 `$lines[450..525]` 형태를 쓰는 편이 안전합니다.
+
+**조치**
+
+- `$lines = Get-Content ...; $lines[450..525]` 방식으로 재실행해 기획서의 A~H 합성 시나리오와 테스트 매트릭스를 확인했습니다.
+
+**재발 방지·후속 조치**
+
+- PowerShell에서 파일 줄 범위를 볼 때는 `$lines = Get-Content ...; $lines[start..end]` 패턴을 사용합니다.
+- `Select-Object -Index`에 범위를 직접 넘기는 방식은 피합니다.

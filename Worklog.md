@@ -3067,3 +3067,51 @@
 - 수동 테스트 문서들이 첫 사용자용 사용 예제와 해석 가이드 역할을 하도록 보강됐습니다.
 - 중요한 새 결정은 기존 D-036 범위에 포함되므로 Decisionlog는 추가하지 않았습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-069 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+
+### W-070 · case-003 추가 필요성 검토와 P4-19 진행 판단
+
+**요청**
+
+- 추가 case-003 이상이 필요한지, 아니면 현재 상태에서 패키징을 바로 진행해도 되는지 엄밀하게 검토하고 판단합니다.
+
+**수행 작업**
+
+- `engineering:testing-strategy`와 `analysis-qa-checklist` 관점으로 현재 검증 커버리지를 점검했습니다.
+- 기획서 14.1 합성 시나리오 A~H, P4-17 통합 시나리오 매트릭스, P4-18 benchmark, case-001·case-002 수동 테스트 문서를 대조했습니다.
+- 현재 테스트 목록과 전체 회귀 테스트 결과를 확인했습니다.
+- case-003을 필수 추가할 경우의 이득과 P4-19 패키징 지연 리스크를 비교했습니다.
+
+**변경 파일**
+
+- 수정: `Decisionlog.md`
+- 수정: `Troubleshootinglog.md`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `python -m pytest src\tests`
+  - 68 passed in 14.14s
+- `python .\tools\preflight_check.py --quiet`
+  - `SUMMARY ok=5 warn=0 error=0`
+- `docs/openbell-guard-research-plan.md`
+  - 14.1 합성 시나리오 A~H와 14.2 테스트 매트릭스를 확인했습니다.
+- `docs/p4-17-scenario-matrix.md`
+  - A~H 시나리오가 국내장 부분 장애, 외부 중개사, 불완전 데이터, 비밀정보, 관측 지연, 원인 단정 방지, 임계값, 손상 입력을 다루는 것을 확인했습니다.
+- `src/tests/test_integration_scenarios.py`
+  - A~H 시나리오 테스트 함수가 존재함을 확인했습니다.
+
+**트러블슈팅**
+
+- T-024: PowerShell에서 `Select-Object -Index 450..525` 범위 문법을 잘못 사용해 오류가 발생했습니다. `$lines = Get-Content ...; $lines[450..525]` 방식으로 재실행해 기획서 내용을 확인했습니다.
+
+**판단 근거**
+
+- 추가 case-003은 포트폴리오 보강 효과는 있지만, 현재 시점의 필수 제출 리스크를 줄이는 효과는 제한적입니다.
+- A~H 자동 통합 시나리오가 주요 위험 케이스를 이미 다루고 있고, case-001·case-002가 사람에게 보여줄 대표 예제 역할을 맡고 있습니다.
+- P4-19에서 남은 핵심 리스크는 새 시나리오 부족보다 설치·호출·ZIP 구조·README·질문 5문항·로그 정합성입니다.
+
+**결과**
+
+- 결론: case-003은 선택적 보강 후보로 두고, 지금은 P4-19 패키징 검증으로 진행하는 것이 타당합니다.
+- 중요한 검증 범위 결정이므로 D-038을 Decisionlog에 추가했습니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-070 요약을 추가하고 D-038 결정 페이지를 생성했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이며 D-038 URL은 `https://app.notion.com/p/38f05ea68bfc81b9b451d4e51f88b345`입니다.
