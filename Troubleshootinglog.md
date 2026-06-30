@@ -770,3 +770,30 @@
 
 - PowerShell에서 파일 줄 범위를 볼 때는 `$lines = Get-Content ...; $lines[start..end]` 패턴을 사용합니다.
 - `Select-Object -Index`에 범위를 직접 넘기는 방식은 피합니다.
+
+### T-025 · Notion 검색 도구의 `max_highlight_length` 허용치를 초과한 문제
+
+**발생 단계**
+
+- Phase/P4 단계: Phase 4 / P4-19 Notion 동기화 검증
+- 관련 W-ID: W-072
+
+**증상**
+
+- Notion Phase 4 페이지에 W-072가 반영됐는지 검색으로 확인하는 과정에서 `max_highlight_length: 700`을 전달했습니다.
+- Notion 검색 도구가 `maximum: 500` 제한을 반환하며 요청을 거절했습니다.
+
+**확인한 원인**
+
+- Notion 검색 도구의 `max_highlight_length` 최대값은 500입니다.
+- 도구 설명에는 기본값과 최대값 제한이 있으므로, 검색 확인 시 과도하게 큰 하이라이트 길이를 넣으면 안 됩니다.
+
+**조치**
+
+- `max_highlight_length`를 500으로 낮춰 재검색했습니다.
+- D-039 페이지 생성과 Phase 4 페이지 갱신 호출 성공, Phase 4 검색 결과 갱신 시각을 확인했습니다.
+
+**재발 방지·후속 조치**
+
+- Notion 검색 도구를 사용할 때 `max_highlight_length`는 500 이하로 설정합니다.
+- 정확한 문구 검증이 필요하면 검색 하이라이트에만 의존하지 말고, 생성·업데이트 도구의 성공 응답과 대상 페이지 재조회 결과를 함께 확인합니다.

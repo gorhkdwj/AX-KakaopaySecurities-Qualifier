@@ -7,7 +7,7 @@ description: Analyze a synthetic or anonymized post-incident brokerage bundle fo
 
 OpenBell Guard는 카카오페이증권 AX 해커톤 제출물을 위한 Codex Skill입니다.
 
-현재 구현 상태는 Phase 4의 P4-18 성능·회귀 benchmark 단계입니다. 플러그인 구조, 지표 계약 복사본, 최소 합성 fixture, `run_openbell.py --bundle --output` 실행 입구, 독립 출력 검증기 `validate_bundle.py --output`, `analysis.json` 기반 `openbell-report.md` 보고서 초안 생성 흐름, A~H 합성 시나리오 통합 테스트, 그리고 `benchmark_openbell.py` 기반 M-016·M-017 benchmark가 있습니다.
+현재 구현 상태는 Phase 4의 P4-19 제출 패키징 검증 단계까지입니다. 플러그인 구조, 지표 계약 복사본, 최소 합성 fixture, `run_openbell.py --bundle --output` 실행 입구, 독립 출력 검증기 `validate_bundle.py --output`, `analysis.json` 기반 `openbell-report.md` 보고서 초안 생성 흐름, A~H 합성 시나리오 통합 테스트, `benchmark_openbell.py` 기반 M-016·M-017 benchmark, 그리고 `submission.zip` 생성·구조 검증 도구가 있습니다.
 
 ## 현재 사용 가능한 범위
 
@@ -24,6 +24,7 @@ OpenBell Guard는 카카오페이증권 AX 해커톤 제출물을 위한 Codex S
 - CLI는 검증 가능한 `analysis.json`만 사용해 사람용 Markdown 초안인 `openbell-report.md`를 생성합니다. 이 초안은 원본 로그를 다시 읽지 않습니다.
 - CLI는 `analysis.json` 구조, evidence 참조, confirmed_fact 근거, 보고서 claim marker, 민감정보 잔존 여부를 자체 검증해 `output-validation.json`을 생성합니다.
 - benchmark CLI는 합성 지원 한도 번들을 생성하고 1회 준비 실행 후 5회 측정 실행으로 M-016 실행시간 중앙값과 M-017 Python 추적 메모리 최고값을 기록합니다.
+- 제출 패키징 도구는 프로젝트 루트의 `README.md`, `src/`, `logs/`를 `submission.zip`으로 묶고, 필수 파일·금지 폴더·로그 형식을 검사합니다.
 
 ## 실행 예시
 
@@ -145,6 +146,8 @@ python src/skills/openbell-guard/scripts/benchmark_openbell.py --output out/p4-1
 - 합성 데이터 분석 결과를 카카오페이증권의 실제 내부 원인으로 단정하지 않습니다.
 - 데이터가 부족하면 추정하지 않고 `null`, `reason_code`, 또는 후속 단계의 `판단 불가`로 표시합니다.
 
-## 다음 구현 예정 범위
+## Phase 4 완료 상태와 다음 범위
 
-다음 단계에서는 설치·호출·제출 패키징 검증을 구현합니다.
+P4-19 기준으로 자동화 가능한 제출 패키징 검증은 완료됐습니다. 별도 새 Codex 앱 세션에서 UI 기반 설치와 신뢰 승인을 직접 확인하는 절차는 최종 제출 전 수동 확인 후보입니다.
+
+다음 개발 후보는 Phase 5 합성 시나리오·자동 검증 확장 또는 Phase 6 최종 제출 점검입니다.

@@ -3154,3 +3154,86 @@
 - 현재 다음 구현 단계는 P4-19 설치·호출·제출 패키징 검증입니다.
 - 중요한 새 결정은 없으므로 Decisionlog는 추가하지 않았습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-071 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+
+### W-072 · P4-19 제출 패키징 검증 구현
+
+**요청**
+
+- P4-18에서 더 작업할 것이 남아있지 않다면 바로 P4-19 작업을 시작합니다.
+- P4-19에서는 플러그인 제출 패키징, 설치·호출 가능성, 제출 ZIP 구조와 로그 포함 여부를 검증합니다.
+
+**수행 작업**
+
+- P4-18 이후 남은 직접 작업이 P4-19임을 확인하고 `plugin-creator` Skill 기준을 읽어 플러그인 패키징 검증 방향을 재확인했습니다.
+- 루트 `README.md`를 새로 작성해 제출물 목적, 해결 문제, 구조, 실행 명령, 결과 읽는 순서, 검증 결과, 안전 경계와 한계를 정리했습니다.
+- `docs/submission-questions.md`에 예선 질문 5문항 답변 초안을 작성했습니다.
+- `tools/build_submission.py`를 추가해 `README.md`, `src/`, `logs/`만 포함하는 `submission/`과 `submission.zip`을 생성하도록 했습니다.
+- `tools/validate_submission.py`를 추가해 ZIP 내부 구조, 필수 파일, 로그 파일 형식, 금지 폴더·파일, manifest 핵심 필드를 검사하도록 했습니다.
+- `docs/p4-19-packaging-report.md`를 작성해 검증 명령, 결과, 새 Codex 세션 UI 설치 검증의 한계를 문서화했습니다.
+- `docs/README.md`에 P4-19 보고서와 제출 질문지 관련 문서 흐름을 연결했습니다.
+- `src/skills/openbell-guard/SKILL.md`의 현재 구현 상태를 P4-19 기준으로 갱신했습니다.
+- `submission.zip`을 다시 빌드하고 제출 폴더 내부 경로에서 대표 fixture를 실행했습니다.
+
+**변경 파일**
+
+- 추가: `README.md`
+- 추가: `docs/p4-19-packaging-report.md`
+- 추가: `docs/submission-questions.md`
+- 추가: `tools/build_submission.py`
+- 추가: `tools/validate_submission.py`
+- 수정: `docs/README.md`
+- 수정: `src/skills/openbell-guard/SKILL.md`
+- 수정: `Decisionlog.md`
+- 수정: `Troubleshootinglog.md`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `python -m py_compile tools\build_submission.py tools\validate_submission.py`
+  - exit code 0
+- `python .\tools\preflight_check.py --quiet`
+  - `SUMMARY ok=5 warn=0 error=0`
+- `python "...\plugin-creator\scripts\validate_plugin.py" .\src`
+  - `Plugin validation passed`
+- `python -X utf8 "...\skill-creator\scripts\quick_validate.py" .\src\skills\openbell-guard`
+  - `Skill is valid!`
+- `python .\tools\build_submission.py`
+  - `zip_file_count: 22`
+  - `log_file_count: 1`
+  - `status: built`
+- `python -m pytest src\tests`
+  - 68 passed
+- `python .\tools\validate_submission.py .\submission.zip`
+  - `status: passed`
+  - `top_level_entries: README.md, logs, src`
+- `python .\submission\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\submission\src\tests\fixtures\domestic-market-open-min\bundle --output .\out\p4-19-submission-smoke-final`
+  - `run_status: report_validated`
+  - `output_validation.status: passed`
+  - `raw_excerpts_emitted: false`
+- `python .\submission\src\skills\openbell-guard\scripts\validate_bundle.py --output .\out\p4-19-submission-smoke-final`
+  - `status: passed`
+  - `fatal: 0`
+  - `secret_residue: passed`
+- `git diff --check`
+  - exit code 0
+  - CRLF 변환 안내만 표시됐고 whitespace 오류는 없었습니다.
+
+**트러블슈팅**
+
+- 새로 기록할 P4-19 기능 오류나 테스트 실패는 없었습니다.
+- `git diff --check`에서 `docs/README.md`의 새 링크 두 줄에 Markdown 줄바꿈용 trailing whitespace가 감지되어 제거했습니다.
+- Notion 동기화 확인 중 검색 도구의 `max_highlight_length` 허용치 500을 초과해 T-025로 기록하고, 값을 낮춰 재검색했습니다.
+
+**판단 근거**
+
+- 과제 요구 제출 구조는 `README.md`, `src/`, `logs/`가 핵심이므로, 개발 참고문서와 로컬 실행 결과는 ZIP에 포함하지 않는 것이 더 명확합니다.
+- 수동 복사 대신 빌드·검증 스크립트를 두면 제출 직전 누락과 불필요 파일 포함을 반복적으로 막을 수 있습니다.
+- 현재 세션에서 새 Codex 앱 UI 설치와 신뢰 승인까지 자동화할 수는 없으므로, 공식 구조 검증과 제출 경로 기준 실행 검증을 자동화 검증 범위로 삼고 한계를 문서에 명시했습니다.
+
+**결과**
+
+- P4-19 자동화 패키징 검증은 완료됐습니다.
+- `submission.zip`은 로컬에 생성됐으며 `.gitignore`에 따라 Git 추적 대상은 아닙니다.
+- 제출 ZIP에는 `README.md`, `src/`, `logs/`만 포함됩니다.
+- 중요한 제출 방식 결정은 D-039로 Decisionlog에 기록했습니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-072 요약을 추가하고 D-039 결정 페이지를 생성했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이며 D-039 URL은 `https://app.notion.com/p/38f05ea68bfc811fb180e9b0eadfe570`입니다.
