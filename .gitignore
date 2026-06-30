@@ -28,3 +28,6 @@ build/
 # Packaged submission artifacts are generated later.
 submission.zip
 submission/
+
+# Local form draft copied into the hackathon submission form.
+submission-form-answers.txt

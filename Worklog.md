@@ -3237,3 +3237,54 @@
 - 제출 ZIP에는 `README.md`, `src/`, `logs/`만 포함됩니다.
 - 중요한 제출 방식 결정은 D-039로 Decisionlog에 기록했습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-072 요약을 추가하고 D-039 결정 페이지를 생성했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이며 D-039 URL은 `https://app.notion.com/p/38f05ea68bfc811fb180e9b0eadfe570`입니다.
+
+### W-073 · 예선 질문 5문항 답변 txt 작성과 Git 제외 설정
+
+**요청**
+
+- 예선 제출 폼의 질문 5문항에 대한 답변을 작성합니다.
+- 답변은 txt 파일로 저장하고, 해당 파일은 `.gitignore`에 추가합니다.
+
+**수행 작업**
+
+- 기존 `docs/submission-questions.md`, `README.md`, 기획서와 출처 문서를 참고해 제출 폼 글자 수 제한에 맞는 짧은 답변으로 재작성했습니다.
+- 루트 `submission-form-answers.txt`에 문항 1~5 답변과 문항 2 출처 URL을 저장했습니다.
+- `.gitignore`에 `submission-form-answers.txt`를 추가해 GitHub 원격 저장소에는 올라가지 않도록 했습니다.
+
+**변경 파일**
+
+- 수정: `.gitignore`
+- 수정: `Worklog.md`
+- 로컬 생성·Git 무시: `submission-form-answers.txt`
+
+**검증**
+
+- 글자 수 확인
+  - 문항 1: 439 / 800
+  - 문항 2: 411 / 800
+  - 문항 3: 631 / 1000
+  - 문항 4: 476 / 800
+  - 문항 5: 584 / 800
+- `git check-ignore -v submission-form-answers.txt`
+  - `.gitignore`의 `submission-form-answers.txt` 규칙으로 무시됨을 확인했습니다.
+- `git status --short --ignored submission-form-answers.txt .gitignore`
+  - `.gitignore`는 수정 상태이고 `submission-form-answers.txt`는 `!!` ignored 상태입니다.
+- `git diff --check`
+  - exit code 0
+  - CRLF 변환 안내만 표시됐고 whitespace 오류는 없었습니다.
+
+**트러블슈팅**
+
+- 글자 수 검사 첫 시도에서 임시 Python 스크립트의 한글 문항 표식이 콘솔 인코딩 영향으로 인식되지 않았습니다. 기존 T-023 유형과 같은 문제로 보고, Python 문자열을 Unicode escape 기반으로 바꿔 글자 수를 재검증했습니다.
+
+**판단 근거**
+
+- 제출 폼 답변은 최종 제출 UI에 붙여 넣기 위한 로컬 초안이므로 GitHub 공개 저장소에 올리지 않는 편이 안전합니다.
+- 답변 내용은 README와 제출 패키징 검증 결과를 과장하지 않고, 실제 운영 로그와 새 Codex UI 설치 검증의 한계를 함께 명시했습니다.
+
+**결과**
+
+- 제출 폼용 답변 txt가 로컬에 저장됐습니다.
+- 답변 txt는 Git ignore 대상입니다.
+- 중요한 새 아키텍처·보안·데이터 처리 결정은 없어 Decisionlog는 추가하지 않았습니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-073 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
