@@ -2604,4 +2604,4 @@
 - 재현 가능한 대표 더미데이터는 필요할 때 `src/tests/fixtures/<scenario>/bundle/`로 승격하는 것이 좋습니다.
 - 중요한 새 결정은 아직 사용자가 선택하지 않았으므로 Decisionlog 항목은 만들지 않았습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-060 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
-- Git 동기화는 커밋과 원격 push 후 완료 문구를 반영 예정입니다.
+- Git 동기화 완료: W-060 기록을 커밋 `c15c143f5ba826080aea801f48881a22ec3643e0`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영합니다.
