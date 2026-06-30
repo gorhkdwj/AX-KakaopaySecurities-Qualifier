@@ -2228,3 +2228,74 @@
 - 다음 단계는 P4-16 Skill 보고서 워크플로입니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-053 요약을 추가하고 D-032 하위 페이지를 생성했으며, fetch로 두 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이고 D-032 URL은 `https://app.notion.com/p/38e05ea68bfc81c6a7cef082e4b1ab49`입니다.
 - Git 동기화 완료: P4-15 산출물과 W-053/D-032/T-014 기록을 커밋 `20c36fedee46e65daee2a582167c070bab93a36c`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영합니다.
+
+### W-054 · Phase 4 P4-16 Skill 보고서 워크플로
+
+**요청**
+
+- 다음 단계 구현을 진행합니다. 현재 순서상 P4-16 Skill 보고서 워크플로를 구현합니다.
+
+**수행 작업**
+
+- `run_openbell.py`의 단계명을 P4-16으로 올렸습니다.
+- `analysis.json` 작성 후 `openbell-report.md`를 생성하는 결정론적 Markdown 초안 렌더러를 추가했습니다.
+- 보고서 초안은 원본 번들을 다시 읽지 않고 검증된 `analysis.json`만 사용하도록 했습니다.
+- 보고서에는 분석 기준, 사고 구간, 서비스 경로 영향, 60초 버킷 요약, 확인된 사실, 원인 가설, 추가 확인 필요, 검토 메모를 포함했습니다.
+- `confirmed_fact`, `hypothesis`, `unknown` claim 문장을 `[C-001]` 형식 claim ID와 연결했습니다.
+- `OUT004_REPORT_CLAIM_REF`를 활성화해 보고서 누락, claim marker 누락, 존재하지 않는 claim marker, analysis claim의 보고서 누락을 fatal 오류로 처리하도록 했습니다.
+- 보고서 표시값의 부동소수점 숫자를 소수점 둘째 자리까지 `ROUND_HALF_UP`으로 반올림하도록 했습니다.
+- CLI 성공 요약을 `run_status=report_validated`로 갱신하고, `outputs.openbell_report_created`, `report.claim_marker_validation`, `report.human_review_required`를 추가했습니다.
+- `validate_bundle.py` 설명을 P4-16 기준으로 갱신했습니다.
+- `SKILL.md`를 P4-16 현재 산출물과 보고서 검증 절차에 맞게 갱신했습니다.
+- D-033과 T-015를 기록했습니다.
+
+**변경 파일**
+
+- 수정: `src/skills/openbell-guard/scripts/run_openbell.py`
+- 수정: `src/skills/openbell-guard/scripts/validate_bundle.py`
+- 수정: `src/tests/test_run_openbell_cli.py`
+- 수정: `src/skills/openbell-guard/SKILL.md`
+- 수정: `Decisionlog.md`
+- 수정: `Troubleshootinglog.md`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `python -m py_compile .\src\skills\openbell-guard\scripts\run_openbell.py .\src\skills\openbell-guard\scripts\validate_bundle.py .\src\tests\test_run_openbell_cli.py`가 통과했습니다.
+- `python -m unittest .\src\tests\test_run_openbell_cli.py -v`를 실행해 CLI·입력 검사·마스킹·행 단위 파서·버킷·M-001~M-015·상태 판정·evidence·claim·analysis·보고서·출력 검증기 테스트 44개가 모두 통과했습니다.
+- `python -m unittest discover .\src\tests -v`를 실행해 전체 테스트 56개가 모두 통과했습니다.
+- `python .\tools\preflight_check.py --quiet` 결과 `SUMMARY ok=5 warn=0 error=0`을 확인했습니다.
+- `python $env:USERPROFILE\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py .\src`가 `Plugin validation passed`로 통과했습니다.
+- `python -X utf8 $env:USERPROFILE\.codex\skills\.system\skill-creator\scripts\quick_validate.py .\src\skills\openbell-guard`가 `Skill is valid!`로 통과했습니다.
+- `python -m json.tool src\.codex-plugin\plugin.json`이 통과했습니다.
+- Skill frontmatter와 필수 파일 존재 검사를 수행해 `plugin_structure_ok`를 확인했습니다.
+- `codex plugin --help`를 확인했으나 현재 설치된 CLI에는 별도 plugin validate 하위 명령이 없어 위 보조 검증기로 대체했습니다.
+- `python .\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\src\tests\fixtures\domestic-market-open-min\bundle --output .\out\p4-16-final-smoke`를 실행해 exit 0, `stage=P4-16`, `run_status=report_validated`, `openbell_report_created=true`, `report.claim_marker_validation=passed`, `output_validation.checks.report_claim_refs=passed`, `checked_file_count=12`를 확인했습니다.
+- `python .\src\skills\openbell-guard\scripts\validate_bundle.py --output .\out\p4-16-final-smoke`를 실행해 exit 0, `status=passed`, `analysis_schema=passed`, `evidence_references=passed`, `confirmed_fact_evidence=passed`, `report_claim_refs=passed`, `secret_residue=passed`를 확인했습니다.
+- `out/p4-16-final-smoke/openbell-report.md`에서 `66.67` 표시와 `[C-001]` claim marker가 확인됐고, `66.667` 표시는 발견되지 않았습니다.
+- `logs/` 파일은 수동 편집하지 않았습니다.
+
+**트러블슈팅**
+
+- T-015를 기록했습니다.
+- 최초 보고서 확인 중 claim statement에 `66.667`처럼 `analysis.json`의 원시 소수 셋째 자리 표시가 남아 있었습니다.
+- 계약서의 보고서 표시값 반올림 기준에 맞춰 `report_display_statement()`를 추가하고 테스트에 `66.67` 포함·`66.667` 미포함 검증을 넣어 해결했습니다.
+- 같은 smoke 출력 폴더를 재사용하니 이전 검증 파일까지 스캔되어 `checked_file_count`가 일시적으로 늘었습니다. 기록용 검증은 새 폴더 `out/p4-16-final-smoke`로 다시 수행했습니다.
+
+**판단 근거**
+
+- P4-16의 핵심은 사람이 읽는 보고서를 만드는 것이지만, Python 명령이 AI 분석 보고서 전체를 대신 작성한다고 표현하면 기획서와 어긋납니다.
+- 따라서 Python은 검증된 `analysis.json`을 누락 없이 Markdown 초안으로 옮기는 템플릿 렌더러 역할만 맡기고, 보고서에는 사람 검토 필요 문구를 명시했습니다.
+- 보고서 claim 문장을 `analysis.json`의 claim ID와 강제 연결하면, 근거 없는 사실 문장이나 존재하지 않는 claim 번호를 제출 전에 차단할 수 있습니다.
+- 원본 로그를 다시 읽지 않는 구조를 유지하면 비밀정보 노출과 원문 발췌 위험을 줄이고, 보고서와 검증 원장의 정합성을 높일 수 있습니다.
+
+**결과**
+
+- P4-16이 완료됐습니다. 이제 OpenBell Guard는 `analysis.json` 생성 후 `openbell-report.md` 초안을 만들고, 보고서 claim marker까지 검증해야 성공합니다.
+- 관련 결정: D-033 `P4-16 보고서는 검증된 analysis.json 기반 결정론적 초안으로 만들고 OUT004를 활성화`
+- 관련 트러블슈팅: T-015 `보고서 claim 문장에 소수 셋째 자리 표시가 남은 문제`
+- 현재 단계는 Phase 4의 P4-16/19이며, P4-15 출력 검증기 다음의 Skill 보고서 워크플로 단계입니다.
+- 남은 태스크는 P4-17~P4-19 약 3단계이며, 예상 작업량은 중간~높음입니다.
+- 다음 단계는 P4-17 통합 시나리오 또는 scenario matrix 검증입니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-054 요약을 추가하고 D-033 하위 페이지를 생성했으며, fetch로 두 항목이 포함된 것을 확인했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이고 D-033 URL은 `https://app.notion.com/p/38f05ea68bfc81aba547e1293bc3c138`입니다.
+- Git 동기화는 Notion 동기화 후 수행 예정입니다.

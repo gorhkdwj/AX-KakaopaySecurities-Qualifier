@@ -1,10 +1,11 @@
 """OpenBell Guard command-line entry point.
 
-P4-15 implements the shared CLI, bundle preflight gate, sanitizer,
+P4-16 implements the shared CLI, bundle preflight gate, sanitizer,
 line-oriented telemetry parser, 60-second bucket preparation, basic bucket
-metrics, observability lag metrics, baseline-vs-incident comparisons, and
+metrics, observability lag metrics, baseline-vs-incident comparisons,
 threshold-based state judgment with context metrics, evidence-backed claims,
-the final machine-verifiable ``analysis.json``, and an output validator:
+the final machine-verifiable ``analysis.json``, a deterministic Markdown
+report draft generated from that validated analysis, and an output validator:
 
 - parse ``--bundle`` and ``--output``;
 - verify that the bundle is an existing, non-symlink directory;
@@ -30,11 +31,10 @@ the final machine-verifiable ``analysis.json``, and an output validator:
 - create evidence and claim summaries without raw excerpts.
 - write ``analysis.json`` by merging metric, state, and evidence summaries
   without raw excerpts.
+- write ``openbell-report.md`` as a deterministic draft from ``analysis.json``
+  without rereading raw telemetry.
 - validate ``analysis.json`` structure, evidence references, claim evidence,
-  claim markers, and sensitive residue before reporting success.
-
-It still does not create the human-readable Markdown report. That behavior
-belongs to later Phase 4 steps and must keep using this entry point.
+  report claim markers, and sensitive residue before reporting success.
 """
 
 from __future__ import annotations
@@ -62,9 +62,10 @@ EXIT_CODES = {
     "output_validation_error": 5,
 }
 
-CLI_STAGE = "P4-15"
+CLI_STAGE = "P4-16"
 SUMMARY_FILENAME = "openbell-cli-summary.json"
 ANALYSIS_FILENAME = "analysis.json"
+REPORT_FILENAME = "openbell-report.md"
 OUTPUT_VALIDATION_FILENAME = "output-validation.json"
 SANITIZED_BUNDLE_DIR = "sanitized-bundle"
 SANITIZATION_REPORT = "sanitization-report.md"
@@ -131,6 +132,8 @@ JSONL_RECORD_BYTE_LIMIT = 1 * MIB
 INCIDENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 EVIDENCE_ID_PATTERN = re.compile(r"^E-\d{3}$")
 CLAIM_ID_PATTERN = re.compile(r"^C-\d{3}$")
+CLAIM_MARKER_TEXT_PATTERN = re.compile(r"\[(C-\d{3})\]")
+DECIMAL_NUMBER_TEXT_PATTERN = re.compile(r"(?<![\w.-])-?\d+\.\d+(?![\w.-])")
 WINDOW_TYPE_VALUES = frozenset({"baseline", "incident"})
 BUCKET_STATE_VALUES = frozenset({"healthy", "breach", "unknown"})
 RUN_STATUS_VALUES = frozenset({"complete", "degraded", "fatal"})
@@ -243,11 +246,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="run_openbell.py",
         description=(
-            "Prepare an OpenBell Guard run directory. P4-15 validates the CLI, "
+            "Prepare an OpenBell Guard run directory. P4-16 validates the CLI, "
             "paths, bundle file contract, byte limits, incident metadata, and "
             "creates a masked working copy, telemetry record summary, bucket summary, "
-            "metric summary, threshold-based state summary, evidence summary, and "
-            "validated analysis.json."
+            "metric summary, threshold-based state summary, evidence summary, "
+            "validated analysis.json, and an openbell-report.md draft."
         ),
     )
     parser.add_argument(
@@ -3149,6 +3152,188 @@ def write_analysis_summary(*, output_path: Path, payload: dict[str, Any]) -> dic
     return None
 
 
+def report_display_value(value: Any) -> str:
+    if value is None:
+        return "판단 불가"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        rounded = Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return format(rounded, "f")
+    return str(value)
+
+
+def report_display_statement(statement: str) -> str:
+    def round_match(match: re.Match[str]) -> str:
+        rounded = Decimal(match.group(0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return format(rounded, "f")
+
+    return DECIMAL_NUMBER_TEXT_PATTERN.sub(round_match, statement).replace("=null", "=판단 불가")
+
+
+def claims_by_type(analysis: dict[str, Any], claim_type: str) -> list[dict[str, Any]]:
+    return [
+        claim
+        for claim in analysis.get("claims", [])
+        if isinstance(claim, dict) and claim.get("claim_type") == claim_type
+    ]
+
+
+def evidence_refs_for_report(claim: dict[str, Any]) -> list[str]:
+    if claim.get("claim_type") == "confirmed_fact":
+        return [str(item) for item in claim.get("evidence_refs", [])]
+    if claim.get("claim_type") == "hypothesis":
+        return [str(item) for item in claim.get("supporting_evidence_refs", [])]
+    return []
+
+
+def render_report_claim_lines(claims: list[dict[str, Any]]) -> list[str]:
+    lines: list[str] = []
+    if not claims:
+        lines.append("해당 항목은 없습니다.")
+        return lines
+
+    for claim in claims:
+        marker = str(claim.get("report_claim_marker", ""))
+        statement = report_display_statement(str(claim.get("statement", "")).strip())
+        if not statement.endswith((".", "!", "?")):
+            statement = f"{statement}."
+        refs = evidence_refs_for_report(claim)
+        ref_text = f" 근거: {', '.join(refs)}." if refs else ""
+        lines.append(f"- {statement}{ref_text} {marker}")
+        if claim.get("claim_type") == "hypothesis":
+            confidence = claim.get("confidence", "unknown")
+            lines.append(f"  - 신뢰도: `{confidence}`")
+            missing_data = claim.get("missing_data", [])
+            if missing_data:
+                lines.append(f"  - 추가 확인 데이터: {', '.join(str(item) for item in missing_data)}")
+        if claim.get("claim_type") == "unknown":
+            missing_data = claim.get("missing_data", [])
+            if missing_data:
+                lines.append(f"  - 판단 보류 이유: {', '.join(str(item) for item in missing_data)}")
+    return lines
+
+
+def render_service_path_lines(analysis: dict[str, Any]) -> list[str]:
+    service_paths = analysis.get("service_paths", [])
+    if not service_paths:
+        return ["- 분석 가능한 서비스 경로가 없습니다."]
+    lines: list[str] = []
+    for service_path in service_paths:
+        if not isinstance(service_path, dict):
+            continue
+        outage_start = report_display_value(service_path.get("outage_start"))
+        recovery_time = report_display_value(service_path.get("recovery_time"))
+        lines.append(
+            "- "
+            f"`{service_path.get('service_path', 'unknown')}`: "
+            f"상태 `{service_path.get('status', 'unknown')}`, "
+            f"장애 시작 {outage_start}, 회복 시각 {recovery_time}, "
+            f"분석창 종료 시 지속 여부 `{report_display_value(service_path.get('ongoing_at_window_end'))}`"
+        )
+    return lines or ["- 분석 가능한 서비스 경로가 없습니다."]
+
+
+def render_bucket_highlight_lines(analysis: dict[str, Any]) -> list[str]:
+    buckets = analysis.get("bucket_metrics", [])
+    if not buckets:
+        return ["- 분석 가능한 60초 버킷이 없습니다."]
+    lines: list[str] = []
+    for bucket in buckets:
+        if not isinstance(bucket, dict):
+            continue
+        metrics = bucket.get("metrics", {})
+        error_rate = metrics.get("error_rate_pct", {}) if isinstance(metrics, dict) else {}
+        request_count = metrics.get("request_count", {}) if isinstance(metrics, dict) else {}
+        error_count = metrics.get("error_count", {}) if isinstance(metrics, dict) else {}
+        lines.append(
+            "- "
+            f"{bucket.get('bucket_start_local', 'unknown local time')} "
+            f"({bucket.get('bucket_start_utc', 'unknown UTC')} UTC 기준): "
+            f"`{bucket.get('service_path', 'unknown')}` "
+            f"`{bucket.get('window_type', 'unknown')}` 버킷, "
+            f"상태 `{bucket.get('bucket_state', 'unknown')}`, "
+            f"요청 {report_display_value(request_count.get('value'))}, "
+            f"오류 {report_display_value(error_count.get('value'))}, "
+            f"오류율 {report_display_value(error_rate.get('value'))}%"
+        )
+    return lines
+
+
+def render_openbell_report(analysis: dict[str, Any]) -> str:
+    incident = analysis.get("incident", {})
+    run = analysis.get("run", {})
+    source_summary = analysis.get("source_summary", {})
+    record_counts = analysis.get("record_counts", {})
+    total_counts = record_counts.get("total", {}) if isinstance(record_counts, dict) else {}
+
+    lines = [
+        "# OpenBell Guard 보고서 초안",
+        "",
+        "> 이 문서는 검증된 `analysis.json`만 사용해 생성한 구조화 초안입니다. 실제 고객 공지, 보상, 법적 판단과 운영 조치는 사람의 검토가 필요합니다.",
+        "",
+        "## 분석 기준",
+        "",
+        f"- fixture_id: `{analysis.get('fixture_id', 'unknown')}`",
+        f"- stage: `{analysis.get('stage', 'unknown')}`",
+        f"- contract_version: `{analysis.get('contract_version', 'unknown')}`",
+        f"- run_status: `{run.get('status', 'unknown')}`",
+        f"- primary_telemetry: `{source_summary.get('primary_telemetry', 'unknown')}`",
+        f"- accepted_record_count: `{report_display_value(total_counts.get('accepted_record_count'))}`",
+        "- raw_excerpts_emitted: `false`",
+        "",
+        "## 사고 구간",
+        "",
+        f"- incident_id: `{incident.get('incident_id', 'unknown')}`",
+        f"- 표시 시간대: `{incident.get('timezone', 'unknown')}`",
+        f"- 기준 구간: `{incident.get('baseline_window', {}).get('start', 'unknown')}`부터 `{incident.get('baseline_window', {}).get('end', 'unknown')}`까지",
+        f"- 사고 구간: `{incident.get('incident_window', {}).get('start', 'unknown')}`부터 `{incident.get('incident_window', {}).get('end', 'unknown')}`까지",
+        "",
+        "## 서비스 경로 영향",
+        "",
+        *render_service_path_lines(analysis),
+        "",
+        "## 60초 버킷 요약",
+        "",
+        *render_bucket_highlight_lines(analysis),
+        "",
+        "## 확인된 사실",
+        "",
+        *render_report_claim_lines(claims_by_type(analysis, "confirmed_fact")),
+        "",
+        "## 원인 가설",
+        "",
+        *render_report_claim_lines(claims_by_type(analysis, "hypothesis")),
+        "",
+        "## 추가 확인 필요",
+        "",
+        *render_report_claim_lines(claims_by_type(analysis, "unknown")),
+        "",
+        "## 검토 메모",
+        "",
+        "- 이 보고서는 합성 또는 익명화 번들 분석용 초안이며 카카오페이증권 실제 운영 원인을 단정하지 않습니다.",
+        "- 원본 텔레메트리 전문은 보고서에 포함하지 않으며, claim ID와 evidence ID로 검증 가능한 요약만 연결합니다.",
+        "- 고객 공지와 사후 보고서는 이 초안을 사람이 검토한 뒤 별도 문서로 작성해야 합니다.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def write_openbell_report(*, output_path: Path, analysis: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        (output_path / REPORT_FILENAME).write_text(render_openbell_report(analysis), encoding="utf-8")
+    except OSError:
+        return issue_payload(
+            exit_code=EXIT_CODES["output_validation_error"],
+            issue_code="CLI021_REPORT_WRITE_FAILED",
+            message="The openbell-report.md file could not be written.",
+            argument="output",
+        )
+    return None
+
+
 def output_validation_issue(
     *,
     issue_code: str,
@@ -3443,6 +3628,99 @@ def validate_output_secret_residue(*, output_path: Path, issues: list[dict[str, 
     return checked_files
 
 
+REPORT_CLAIM_SECTION_HEADINGS = frozenset({"## 확인된 사실", "## 원인 가설", "## 추가 확인 필요"})
+
+
+def add_report_claim_issue(issues: list[dict[str, Any]], message: str, source_location: str | None = None) -> None:
+    issues.append(
+        output_validation_issue(
+            issue_code="OUT004_REPORT_CLAIM_REF",
+            message=message,
+            source_file=REPORT_FILENAME,
+            source_location=source_location,
+        )
+    )
+
+
+def validate_report_claim_refs(
+    *,
+    output_path: Path,
+    analysis: dict[str, Any] | None,
+    issues: list[dict[str, Any]],
+) -> None:
+    report_path = output_path / REPORT_FILENAME
+    if analysis is None:
+        return
+
+    claims = analysis.get("claims", [])
+    if not isinstance(claims, list):
+        return
+    expected_claim_ids = {
+        str(claim.get("claim_id"))
+        for claim in claims
+        if isinstance(claim, dict) and isinstance(claim.get("claim_id"), str)
+    }
+    expected_markers = {f"[{claim_id}]" for claim_id in expected_claim_ids}
+
+    if not report_path.exists():
+        add_report_claim_issue(issues, "openbell-report.md is missing.")
+        return
+
+    try:
+        report_text = report_path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        add_report_claim_issue(issues, "openbell-report.md must be readable UTF-8 text.")
+        return
+
+    found_claim_ids: set[str] = set()
+    claim_section_line_count = 0
+    in_claim_section = False
+    for line_no, line in enumerate(report_text.splitlines(), start=1):
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            in_claim_section = stripped in REPORT_CLAIM_SECTION_HEADINGS
+
+        markers = CLAIM_MARKER_TEXT_PATTERN.findall(line)
+        for marker_claim_id in markers:
+            if marker_claim_id not in expected_claim_ids:
+                add_report_claim_issue(
+                    issues,
+                    "A report claim marker does not exist in analysis.json claims.",
+                    f"L{line_no}",
+                )
+            else:
+                found_claim_ids.add(marker_claim_id)
+
+        if in_claim_section and line.startswith("- "):
+            claim_section_line_count += 1
+            if not markers:
+                add_report_claim_issue(
+                    issues,
+                    "A report claim sentence is missing a [C-001] style claim marker.",
+                    f"L{line_no}",
+                )
+                continue
+            if not any(stripped.endswith(marker) for marker in expected_markers):
+                add_report_claim_issue(
+                    issues,
+                    "A report claim sentence must end with a valid claim marker.",
+                    f"L{line_no}",
+                )
+
+    missing_claim_ids = sorted(expected_claim_ids - found_claim_ids)
+    for claim_id in missing_claim_ids:
+        add_report_claim_issue(
+            issues,
+            f"analysis.json claim {claim_id} is missing from openbell-report.md.",
+        )
+
+    if expected_claim_ids and claim_section_line_count == 0:
+        add_report_claim_issue(
+            issues,
+            "openbell-report.md does not contain claim lines in the required claim sections.",
+        )
+
+
 def output_validation_summary(*, issues: list[dict[str, Any]], checked_files: list[str]) -> dict[str, Any]:
     issue_codes = {issue["issue_code"] for issue in issues}
     return {
@@ -3456,7 +3734,7 @@ def output_validation_summary(*, issues: list[dict[str, Any]], checked_files: li
             "analysis_schema": "failed" if "OUT001_SCHEMA" in issue_codes else "passed",
             "evidence_references": "failed" if "OUT002_BROKEN_EVIDENCE_REF" in issue_codes else "passed",
             "confirmed_fact_evidence": "failed" if "OUT003_FACT_WITHOUT_EVIDENCE" in issue_codes else "passed",
-            "report_claim_refs": "not_applicable_until_p4_16",
+            "report_claim_refs": "failed" if "OUT004_REPORT_CLAIM_REF" in issue_codes else "passed",
             "secret_residue": "failed" if "OUT005_SECRET_RESIDUE" in issue_codes else "passed",
         },
         "issue_counts": {"fatal": len(issues)},
@@ -3538,6 +3816,7 @@ def validate_output_directory(
     if isinstance(analysis, dict):
         validate_analysis_bucket_metrics(analysis, issues)
         validate_analysis_evidence_and_claims(analysis, issues)
+        validate_report_claim_refs(output_path=output_path, analysis=analysis, issues=issues)
 
     scanned_files = validate_output_secret_residue(output_path=output_path, issues=issues)
     checked_files = sorted(set(checked_files + scanned_files))
@@ -3695,7 +3974,7 @@ def success_payload(
     return {
         "schema_version": "0.1",
         "stage": CLI_STAGE,
-        "run_status": "analysis_validated",
+        "run_status": "report_validated",
         "exit_code": EXIT_CODES["ok"],
         "bundle": {
             "name": bundle_path.name,
@@ -3720,6 +3999,8 @@ def success_payload(
             "evidence_summary_created": True,
             "analysis_json_file": ANALYSIS_FILENAME,
             "analysis_json_created": True,
+            "openbell_report_file": REPORT_FILENAME,
+            "openbell_report_created": True,
             "output_validation_file": OUTPUT_VALIDATION_FILENAME,
             "output_validation_created": True,
             "sanitization_report_created": True,
@@ -3784,6 +4065,14 @@ def success_payload(
             "claim_count": len(analysis_summary["claims"]),
             "raw_excerpts_emitted": False,
         },
+        "report": {
+            "openbell_report_file": REPORT_FILENAME,
+            "source_file": ANALYSIS_FILENAME,
+            "draft_generation_mode": "deterministic_template_from_validated_analysis",
+            "claim_marker_validation": output_validation_summary_payload["checks"]["report_claim_refs"],
+            "raw_excerpts_emitted": False,
+            "human_review_required": True,
+        },
         "output_validation": {
             "output_validation_file": OUTPUT_VALIDATION_FILENAME,
             "status": output_validation_summary_payload["status"],
@@ -3823,13 +4112,13 @@ def success_payload(
             "create evidence and claim summaries without raw excerpts",
             "write evidence-summary.json without raw excerpts",
             "write analysis.json without raw excerpts",
-            "validate analysis.json structure, evidence references, claim evidence, and secret residue",
+            "write openbell-report.md draft from analysis.json without raw excerpts",
+            "validate analysis.json structure, evidence references, claim evidence, report claim markers, and secret residue",
             "write output-validation.json without raw excerpts",
         ],
         "deferred_scope": [
-            "openbell-report.md generation",
-            "OUT004 report claim sentence validation after openbell-report.md exists",
             "M-016 through M-017 pipeline benchmark metric calculation",
+            "AI-assisted narrative polishing beyond deterministic report draft",
         ],
         "exit_code_skeleton": EXIT_CODES,
     }
@@ -3928,6 +4217,10 @@ def run(bundle_arg: str, output_arg: str) -> int:
         write_stderr_json(issue)
         return int(issue["exit_code"])
     issue = write_analysis_summary(output_path=output_path, payload=analysis_summary)
+    if issue is not None:
+        write_stderr_json(issue)
+        return int(issue["exit_code"])
+    issue = write_openbell_report(output_path=output_path, analysis=analysis_summary)
     if issue is not None:
         write_stderr_json(issue)
         return int(issue["exit_code"])

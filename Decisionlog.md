@@ -1102,3 +1102,42 @@ P4-15에서 출력 검증기를 구현하면서 `OUT001_SCHEMA`, `OUT002_BROKEN_
 - 독립 실행기 `validate_bundle.py --output <dir>`는 이미 생성된 출력 디렉터리도 재검증할 수 있습니다.
 - P4-16에서 `openbell-report.md`가 생성되면 `OUT004_REPORT_CLAIM_REF`를 실제 검증으로 전환해야 합니다.
 - 검증 항목이 늘어나면 `output-validation.json`의 `checks` 필드와 관련 테스트를 함께 갱신합니다.
+
+### D-033 · P4-16 보고서는 검증된 analysis.json 기반 결정론적 초안으로 만들고 OUT004를 활성화
+
+**상황**
+
+P4-16에서 사람용 Markdown 보고서인 `openbell-report.md`를 연결해야 했습니다. 기획서에는 “Codex가 검증된 `analysis.json`을 읽어 보고서를 완성한다”고 되어 있으므로, Python이 원본 로그를 다시 읽거나 AI 판단을 대신하는 구조로 만들면 범위와 표현이 어긋날 수 있습니다. 동시에 제출물 검증을 위해서는 보고서 파일과 claim marker 검증이 재현 가능해야 했습니다.
+
+**검토한 선택지**
+
+1. Python CLI가 `analysis.json`만 만들고, Codex 대화에서 매번 수동으로 `openbell-report.md`를 작성합니다.
+2. Python CLI가 원본 번들과 중간 산출물을 모두 읽어 완성형 보고서를 생성합니다.
+3. Python CLI는 검증된 `analysis.json`만 읽어 구조화된 Markdown 초안을 결정론적으로 생성하고, Skill 설명에서는 사람이 검토해야 하는 초안임을 명시합니다.
+
+**결정**
+
+- 선택지 3을 채택합니다.
+- `run_openbell.py`는 `analysis.json` 작성 후 `openbell-report.md` 초안을 생성합니다.
+- 보고서 초안은 원본 로그·원본 번들 절대경로를 다시 읽지 않고, `analysis.json`의 요약값과 claim만 사용합니다.
+- 보고서의 확인된 사실, 원인 가설, 추가 확인 필요 섹션은 `analysis.json`의 `confirmed_fact`, `hypothesis`, `unknown` claim으로 구성합니다.
+- 각 claim 문장은 `[C-001]` 형식의 marker로 끝나야 하며, marker는 `analysis.json.claims[].claim_id`에 실제 존재해야 합니다.
+- `OUT004_REPORT_CLAIM_REF`를 P4-16부터 활성화해 보고서 누락, marker 누락, 존재하지 않는 marker, claim의 보고서 누락을 fatal 오류로 처리합니다.
+- 보고서 표시용 소수값은 소수점 둘째 자리까지 `ROUND_HALF_UP`으로 반올림하되, 판정 자체는 `analysis.json`의 원래 계산 결과를 바꾸지 않습니다.
+- CLI 성공 상태는 `analysis_validated`에서 `report_validated`로 올립니다.
+
+**근거**
+
+- 매번 수동으로 보고서를 쓰면 테스트와 제출물 재현성이 낮아지고, claim ID 누락을 자동으로 잡기 어렵습니다.
+- 반대로 Python이 원본 로그까지 다시 읽어 완성형 서사를 만들면 “검증된 결과만 읽어 보고서를 작성한다”는 안전 경계가 약해집니다.
+- 결정론적 템플릿 초안은 재현 가능하고 테스트하기 쉬우며, Codex Skill 설명의 “초안·사람 검토 필요” 원칙과 충돌하지 않습니다.
+- `OUT004`를 활성화하면 보고서 문장이 검증 원장과 떨어져 나가는 문제를 조기에 막을 수 있습니다.
+- 보고서 표시값 반올림을 분리하면 사람이 읽는 값의 일관성을 유지하면서도 threshold 판정 기준은 보존할 수 있습니다.
+
+**영향 및 재검토 조건**
+
+- P4-16 이후 기본 산출물에는 `openbell-report.md`가 포함됩니다.
+- `validate_bundle.py --output <dir>`는 이제 `analysis.json`뿐 아니라 `openbell-report.md`의 claim marker도 검사합니다.
+- 후속 P4-17 통합 시나리오는 보고서 누락·잘못된 claim marker·비밀정보 잔존 케이스를 포함해 검증할 수 있습니다.
+- 향후 AI가 문장을 더 자연스럽게 다듬는 기능을 넣더라도, `analysis.json` 밖의 사실을 추가하지 않고 `OUT004` 검증을 통과해야 합니다.
+- 보고서 섹션 구성이 바뀌면 `REPORT_CLAIM_SECTION_HEADINGS`와 관련 테스트를 함께 갱신해야 합니다.

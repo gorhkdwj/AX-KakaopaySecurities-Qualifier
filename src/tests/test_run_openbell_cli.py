@@ -1,8 +1,8 @@
-"""CLI, bundle-preflight, sanitizer, row-parser, bucket, metric, state, claim, analysis, and output validation tests.
+"""CLI, bundle-preflight, sanitizer, row-parser, bucket, metric, state, claim, analysis, report, and output validation tests.
 
-P4-15 keeps the shared command-line entry point, validates the final
-machine-verifiable analysis.json, and still must not create the human-readable
-Markdown report.
+P4-16 keeps the shared command-line entry point, validates the final
+machine-verifiable analysis.json, creates openbell-report.md from that
+validated analysis, and validates report claim markers.
 """
 
 from __future__ import annotations
@@ -214,12 +214,13 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertTrue(summary_path.exists())
 
             payload = json.loads(summary_path.read_text(encoding="utf-8"))
-            self.assertEqual("P4-15", payload["stage"])
-            self.assertEqual("analysis_validated", payload["run_status"])
+            self.assertEqual("P4-16", payload["stage"])
+            self.assertEqual("report_validated", payload["run_status"])
             self.assertFalse(payload["bundle"]["raw_telemetry_records_parsed"])
             self.assertTrue(payload["bundle"]["sanitized_telemetry_records_parsed"])
             self.assertFalse(payload["bundle"]["raw_excerpts_emitted"])
             self.assertTrue(payload["outputs"]["analysis_json_created"])
+            self.assertTrue(payload["outputs"]["openbell_report_created"])
             self.assertTrue(payload["outputs"]["output_validation_created"])
             self.assertTrue(payload["outputs"]["sanitization_report_created"])
             self.assertTrue(payload["outputs"]["record_summary_created"])
@@ -237,6 +238,7 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertTrue((output_path / "state-summary.json").exists())
             self.assertTrue((output_path / "evidence-summary.json").exists())
             self.assertTrue((output_path / "analysis.json").exists())
+            self.assertTrue((output_path / "openbell-report.md").exists())
             self.assertTrue((output_path / "output-validation.json").exists())
             self.assertEqual("logs.jsonl", payload["telemetry"]["primary_telemetry"])
             self.assertEqual(9, payload["telemetry"]["record_counts"]["total"]["physical_record_count"])
@@ -273,13 +275,17 @@ class RunOpenBellCliTest(unittest.TestCase):
             self.assertGreaterEqual(payload["evidence"]["claim_counts"]["hypothesis"], 1)
             self.assertGreaterEqual(payload["evidence"]["claim_counts"]["unknown"], 1)
             self.assertEqual("analysis.json", payload["analysis"]["analysis_json_file"])
+            self.assertEqual("openbell-report.md", payload["report"]["openbell_report_file"])
+            self.assertEqual("analysis.json", payload["report"]["source_file"])
+            self.assertTrue(payload["report"]["human_review_required"])
+            self.assertEqual("passed", payload["report"]["claim_marker_validation"])
             self.assertEqual("domestic-market-open-min", payload["analysis"]["fixture_id"])
             self.assertEqual(3, payload["analysis"]["bucket_metric_count"])
             self.assertGreaterEqual(payload["analysis"]["claim_count"], 3)
             self.assertEqual("passed", payload["output_validation"]["status"])
             self.assertEqual(0, payload["output_validation"]["exit_code"])
             self.assertEqual("passed", payload["output_validation"]["checks"]["analysis_schema"])
-            self.assertEqual("not_applicable_until_p4_16", payload["output_validation"]["checks"]["report_claim_refs"])
+            self.assertEqual("passed", payload["output_validation"]["checks"]["report_claim_refs"])
 
             serialized = json.dumps(payload, ensure_ascii=False)
             self.assertNotIn(str(FIXTURE_BUNDLE), serialized)
@@ -454,7 +460,7 @@ class SanitizationTest(unittest.TestCase):
             self.assertEqual(original_logs, (bundle_path / "logs.jsonl").read_text(encoding="utf-8"))
 
             summary = json.loads((output_path / "openbell-cli-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-15", summary["stage"])
+            self.assertEqual("P4-16", summary["stage"])
             self.assertTrue(summary["outputs"]["sanitization_report_created"])
             self.assertTrue(summary["outputs"]["analysis_json_created"])
             self.assertEqual(7, summary["sanitization"]["total_redactions"])
@@ -659,7 +665,7 @@ class BucketSummaryTest(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             bucket_summary = json.loads((output_path / "bucket-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-15", bucket_summary["stage"])
+            self.assertEqual("P4-16", bucket_summary["stage"])
             self.assertEqual("UTC", bucket_summary["time_basis"])
             self.assertEqual("Asia/Seoul", bucket_summary["display_timezone"])
             self.assertEqual(["service_path", "bucket_start_utc"], bucket_summary["sort_order"])
@@ -725,7 +731,7 @@ class BasicMetricSummaryTest(unittest.TestCase):
             metric_summary = json.loads((output_path / "metric-summary.json").read_text(encoding="utf-8"))
             expected_analysis = json.loads(EXPECTED_ANALYSIS.read_text(encoding="utf-8"))
 
-            self.assertEqual("P4-15", metric_summary["stage"])
+            self.assertEqual("P4-16", metric_summary["stage"])
             self.assertEqual("logs.jsonl", metric_summary["primary_telemetry"])
             self.assertEqual(
                 [
@@ -1284,7 +1290,7 @@ class StateSummaryTest(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             state_summary = json.loads((output_path / "state-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-15", state_summary["stage"])
+            self.assertEqual("P4-16", state_summary["stage"])
             self.assertEqual("complete", state_summary["run"]["status"])
             self.assertEqual(0, state_summary["run"]["exit_code"])
             self.assertEqual([], state_summary["run"]["limitations"])
@@ -1429,7 +1435,7 @@ class EvidenceClaimSummaryTest(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             evidence_summary = json.loads((output_path / "evidence-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("P4-15", evidence_summary["stage"])
+            self.assertEqual("P4-16", evidence_summary["stage"])
             self.assertEqual("complete", evidence_summary["status"])
             self.assertFalse(evidence_summary["raw_excerpts_emitted"])
             self.assertGreaterEqual(evidence_summary["evidence_count"], 4)
@@ -1508,7 +1514,7 @@ class AnalysisJsonOutputTest(unittest.TestCase):
             analysis = json.loads((output_path / "analysis.json").read_text(encoding="utf-8"))
 
             self.assertEqual("1.0", analysis["schema_version"])
-            self.assertEqual("P4-15", analysis["stage"])
+            self.assertEqual("P4-16", analysis["stage"])
             self.assertEqual(expected["contract_version"], analysis["contract_version"])
             self.assertEqual(expected["contract_sha256"], analysis["contract_sha256"])
             self.assertEqual(expected["fixture_id"], analysis["fixture_id"])
@@ -1589,6 +1595,48 @@ class AnalysisJsonOutputTest(unittest.TestCase):
             self.assertNotIn("api_key=", serialized)
 
 
+class OpenBellReportOutputTest(unittest.TestCase):
+    def test_openbell_report_contains_claim_sections_and_markers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "openbell-out"
+
+            completed = run_cli("--bundle", str(FIXTURE_BUNDLE), "--output", str(output_path))
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            analysis = json.loads((output_path / "analysis.json").read_text(encoding="utf-8"))
+            report = (output_path / "openbell-report.md").read_text(encoding="utf-8")
+
+            self.assertIn("# OpenBell Guard 보고서 초안", report)
+            self.assertIn("## 확인된 사실", report)
+            self.assertIn("## 원인 가설", report)
+            self.assertIn("## 추가 확인 필요", report)
+            self.assertIn("사람의 검토가 필요", report)
+            self.assertIn("66.67", report)
+            self.assertNotIn("66.667", report)
+            for claim in analysis["claims"]:
+                self.assertIn(claim["report_claim_marker"], report)
+            self.assertNotIn("market data request synthetic timeout", report)
+            self.assertNotIn(str(PROJECT_ROOT), report)
+            self.assertNotIn(str(FIXTURE_BUNDLE), report)
+
+    def test_openbell_report_does_not_leak_seeded_secret_messages(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_path = Path(temp_dir) / "bundle"
+            output_path = Path(temp_dir) / "out"
+            bundle_path.mkdir()
+            write_valid_incident(bundle_path)
+            write_seeded_secret_logs(bundle_path)
+
+            completed = run_cli("--bundle", str(bundle_path), "--output", str(output_path))
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            report = (output_path / "openbell-report.md").read_text(encoding="utf-8")
+            for secret in SEEDED_SECRET_VALUES:
+                self.assertNotIn(secret, report)
+            self.assertNotIn("Authorization: Bearer", report)
+            self.assertNotIn("api_key=", report)
+
+
 class OutputValidationTest(unittest.TestCase):
     def test_standalone_validator_accepts_fixture_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1600,15 +1648,62 @@ class OutputValidationTest(unittest.TestCase):
 
             self.assertEqual(0, validated.returncode, validated.stderr)
             payload = json.loads(validated.stdout)
-            self.assertEqual("P4-15", payload["stage"])
+            self.assertEqual("P4-16", payload["stage"])
             self.assertEqual("passed", payload["status"])
             self.assertEqual(0, payload["exit_code"])
             self.assertEqual("passed", payload["checks"]["analysis_schema"])
             self.assertEqual("passed", payload["checks"]["evidence_references"])
             self.assertEqual("passed", payload["checks"]["confirmed_fact_evidence"])
-            self.assertEqual("not_applicable_until_p4_16", payload["checks"]["report_claim_refs"])
+            self.assertEqual("passed", payload["checks"]["report_claim_refs"])
             self.assertEqual("passed", payload["checks"]["secret_residue"])
             self.assertIn("analysis.json", payload["checked_files"])
+            self.assertIn("openbell-report.md", payload["checked_files"])
+
+    def test_validator_fails_out004_when_report_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "openbell-out"
+            completed = run_cli("--bundle", str(FIXTURE_BUNDLE), "--output", str(output_path))
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            (output_path / "openbell-report.md").unlink()
+
+            validated = run_validator("--output", str(output_path))
+
+            self.assertEqual(5, validated.returncode)
+            self.assertIn("OUT004_REPORT_CLAIM_REF", validated.stderr)
+            validation_report = json.loads((output_path / "output-validation.json").read_text(encoding="utf-8"))
+            self.assertEqual("failed", validation_report["checks"]["report_claim_refs"])
+
+    def test_validator_fails_out004_when_report_claim_marker_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "openbell-out"
+            completed = run_cli("--bundle", str(FIXTURE_BUNDLE), "--output", str(output_path))
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            report_path = output_path / "openbell-report.md"
+            report = report_path.read_text(encoding="utf-8").replace("[C-001]", "", 1)
+            report_path.write_text(report, encoding="utf-8")
+
+            validated = run_validator("--output", str(output_path))
+
+            self.assertEqual(5, validated.returncode)
+            self.assertIn("OUT004_REPORT_CLAIM_REF", validated.stderr)
+            validation_report = json.loads((output_path / "output-validation.json").read_text(encoding="utf-8"))
+            self.assertEqual("failed", validation_report["checks"]["report_claim_refs"])
+
+    def test_validator_fails_out004_when_report_claim_marker_is_unknown(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "openbell-out"
+            completed = run_cli("--bundle", str(FIXTURE_BUNDLE), "--output", str(output_path))
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            report_path = output_path / "openbell-report.md"
+            report = report_path.read_text(encoding="utf-8").replace("[C-001]", "[C-999]", 1)
+            report_path.write_text(report, encoding="utf-8")
+
+            validated = run_validator("--output", str(output_path))
+
+            self.assertEqual(5, validated.returncode)
+            self.assertIn("OUT004_REPORT_CLAIM_REF", validated.stderr)
+            validation_report = json.loads((output_path / "output-validation.json").read_text(encoding="utf-8"))
+            self.assertEqual("failed", validation_report["checks"]["report_claim_refs"])
 
     def test_validator_fails_out001_for_internal_threshold_key_leak(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

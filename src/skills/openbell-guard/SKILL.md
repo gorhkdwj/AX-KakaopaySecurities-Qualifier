@@ -7,7 +7,7 @@ description: Analyze a synthetic or anonymized post-incident brokerage bundle fo
 
 OpenBell Guard는 카카오페이증권 AX 해커톤 제출물을 위한 Codex Skill입니다.
 
-현재 구현 상태는 Phase 4의 P4-15 출력 검증기 단계입니다. 플러그인 구조, 지표 계약 복사본, 최소 합성 fixture, `run_openbell.py --bundle --output` 실행 입구, 그리고 독립 출력 검증기 `validate_bundle.py --output`이 있습니다.
+현재 구현 상태는 Phase 4의 P4-16 Skill 보고서 워크플로 단계입니다. 플러그인 구조, 지표 계약 복사본, 최소 합성 fixture, `run_openbell.py --bundle --output` 실행 입구, 독립 출력 검증기 `validate_bundle.py --output`, 그리고 `analysis.json` 기반 `openbell-report.md` 보고서 초안 생성 흐름이 있습니다.
 
 ## 현재 사용 가능한 범위
 
@@ -21,8 +21,8 @@ OpenBell Guard는 카카오페이증권 AX 해커톤 제출물을 위한 Codex S
 - CLI는 설정된 임계치로 버킷 상태, 서비스 경로 상태, 장애 시작과 회복 시각을 판정해 `state-summary.json`을 생성합니다.
 - CLI는 확인된 사실, 원인 가설, 판단 불가 항목을 근거 ID와 연결해 `evidence-summary.json`을 생성합니다.
 - CLI는 중간 산출물을 병합해 최종 기계 검증용 `analysis.json`을 생성합니다.
-- CLI는 `analysis.json` 구조, evidence 참조, confirmed_fact 근거, claim marker, 민감정보 잔존 여부를 자체 검증해 `output-validation.json`을 생성합니다.
-- 아직 사람용 Markdown 보고서인 `openbell-report.md`는 생성하지 않습니다.
+- CLI는 검증 가능한 `analysis.json`만 사용해 사람용 Markdown 초안인 `openbell-report.md`를 생성합니다. 이 초안은 원본 로그를 다시 읽지 않습니다.
+- CLI는 `analysis.json` 구조, evidence 참조, confirmed_fact 근거, 보고서 claim marker, 민감정보 잔존 여부를 자체 검증해 `output-validation.json`을 생성합니다.
 
 ## 실행 예시
 
@@ -47,9 +47,10 @@ python src/skills/openbell-guard/scripts/validate_bundle.py --output out/domesti
 - `state-summary.json`
 - `evidence-summary.json`
 - `analysis.json`
+- `openbell-report.md`
 - `output-validation.json`
 
-`analysis.json`은 P4-15 기준 최종 기계 검증용 원장이며, `output-validation.json`은 해당 원장과 산출물의 자체 검증 결과입니다.
+`analysis.json`은 P4-16 기준 최종 기계 검증용 원장이며, `openbell-report.md`는 이 원장을 사람이 읽기 쉽게 옮긴 검토용 초안입니다. `output-validation.json`은 원장, 보고서 claim marker와 산출물의 자체 검증 결과입니다.
 
 ## 기본 지표 계산 기준
 
@@ -100,13 +101,15 @@ python src/skills/openbell-guard/scripts/validate_bundle.py --output out/domesti
 - 로그 원문 메시지를 그대로 쓰지 않고, 계산 요약과 원래 위치만 근거로 남깁니다.
 - CPU·메모리 값은 맥락 근거로 사용할 수 있지만, 단독으로 자원 포화나 근본 원인을 확정하지 않습니다.
 
-## analysis.json과 output-validation.json 기준
+## analysis.json, openbell-report.md와 output-validation.json 기준
 
 - `analysis.json`은 `record-summary.json`, `metric-summary.json`, `state-summary.json`, `evidence-summary.json`을 병합한 기계 검증용 기준 산출물입니다.
 - `contract_version`, 계약 파일 SHA-256, 사고 구간, 처리 레코드 수, 서비스 경로 상태, bucket 지표, 비교 지표, 맥락 지표, evidence와 claim을 포함합니다.
 - `analysis.json`에는 원본 번들의 절대경로와 원문 로그 메시지를 넣지 않습니다.
-- `output-validation.json`은 `analysis.json` 구조, 끊어진 evidence 참조, 근거 없는 `confirmed_fact`, claim marker, 민감정보 잔존 여부를 기록합니다.
-- `OUT004_REPORT_CLAIM_REF`는 아직 `openbell-report.md`가 없으므로 P4-15에서는 `not_applicable_until_p4_16`으로 남기고, P4-16 보고서 생성 단계에서 활성화합니다.
+- `openbell-report.md`는 `analysis.json`을 바탕으로 분석 기준, 사고 구간, 서비스 경로 영향, 60초 버킷 요약, 확인된 사실, 원인 가설, 추가 확인 필요를 나눠 작성합니다.
+- `openbell-report.md`의 확인된 사실·원인 가설·추가 확인 필요 문장은 `[C-001]` 형식의 claim ID로 끝나야 합니다.
+- `output-validation.json`은 `analysis.json` 구조, 끊어진 evidence 참조, 근거 없는 `confirmed_fact`, 보고서 claim marker 누락·미존재, 민감정보 잔존 여부를 기록합니다.
+- `OUT004_REPORT_CLAIM_REF`는 P4-16부터 활성화되어, 보고서 claim 문장에 없는 claim ID가 붙거나 필요한 claim ID가 빠지면 fatal 오류로 처리합니다.
 
 ## 안전 원칙
 
@@ -117,4 +120,4 @@ python src/skills/openbell-guard/scripts/validate_bundle.py --output out/domesti
 
 ## 다음 구현 예정 범위
 
-다음 단계에서는 Markdown 보고서 템플릿, 통합 시나리오, 실행시간·Python 추적 메모리 benchmark를 순차적으로 구현합니다.
+다음 단계에서는 통합 시나리오, 실행시간·Python 추적 메모리 benchmark, 제출 패키징 검증을 순차적으로 구현합니다.
