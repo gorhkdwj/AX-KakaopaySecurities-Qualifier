@@ -3830,3 +3830,57 @@
 
 - 제출폼에 복사할 최종 TXT 답변이 갱신됐습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-083 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+
+### W-084 · submission.zip 내부 대화 로그 최신화 재빌드
+
+**요청**
+
+- `submission.zip` 안의 대화 로그 파일도 최종본까지 업데이트해 반영합니다.
+
+**수행 작업**
+
+- 로컬 `logs/` 파일과 기존 `submission.zip` 내부 로그 크기·수정 시각을 비교했습니다.
+- 기존 ZIP 내부 로그가 로컬 로그보다 오래된 것을 확인했습니다.
+- 원본 로그 파일은 편집하지 않고 `tools/build_submission.py`로 `submission.zip`을 재생성했습니다.
+- ZIP 구조 검증을 실행해 필수 파일과 로그 포함 여부를 확인했습니다.
+
+**변경 파일**
+
+- 수정: `Worklog.md`
+- 재생성: `submission.zip`, `submission/`
+
+**검증**
+
+- 초기 비교
+  - 로컬 로그: `logs/codex/019f0d16-731e-7d22-8ea2-c0731e9cd879.jsonl`, 825,838 bytes, 2026-06-30 18:43:55
+  - 기존 ZIP 로그: 809,504 bytes, 2026-06-30 18:19:52
+  - 결론: ZIP 로그가 로컬 로그보다 오래됨
+- `python .\tools\build_submission.py`
+  - `zip_file_count: 18`
+  - `log_file_count: 1`
+  - `status: built`
+- `python .\tools\validate_submission.py .\submission.zip`
+  - `status: passed`
+  - `file_count: 18`
+  - `log_file_count: 1`
+  - 최상위 항목: `README.md`, `logs`, `src`
+- ZIP 내부 점검
+  - `zip_log_count=1`
+  - `has_readme=True`
+  - `has_gitkeep=False`
+
+**트러블슈팅**
+
+- 현재 턴 중에도 로그 파일이 계속 갱신되어, ZIP 재생성 직후 검증 명령을 실행하면 그 검증 과정 자체가 다시 로컬 로그에 반영될 수 있음을 확인했습니다.
+- 따라서 기록·커밋·푸시 후 마지막 단계에서 `submission.zip`을 한 번 더 재생성해 가능한 최신 로그를 반영하는 방식으로 마무리합니다.
+
+**판단 근거**
+
+- 로그 무결성 규칙상 기존 `logs/` 원본 파일을 수동 편집하지 않고, 공식 빌드 스크립트가 현재 `logs/`를 복사해 ZIP을 재생성하는 방식이 안전합니다.
+- 대화 로그는 훅이 턴 종료 시점에 갱신하는 구조라, 이 응답 자체까지 ZIP에 포함시키는 것은 현재 턴 안에서 보장하기 어렵습니다. 다만 마지막 재빌드 시점까지 로컬에 저장된 최신 로그는 ZIP에 반영합니다.
+
+**결과**
+
+- `submission.zip` 내부 로그를 로컬 최신 로그 기준으로 재생성했습니다.
+- 최종 기록·커밋 후 마지막으로 다시 한 번 ZIP을 재빌드할 예정입니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-084 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
