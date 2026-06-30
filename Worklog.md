@@ -3777,3 +3777,56 @@
 - 이대로 최종 종료해도 충분한 상태로 판단합니다.
 - 선택적으로 남길 수 있는 작업은 “새 Codex 앱 UI에서 사람이 직접 플러그인 카드와 신뢰 승인 화면을 클릭해 보는 수동 확인”뿐이며, 이는 자동 검증 완료 상태를 뒤집는 필수 작업은 아닙니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-082 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+
+### W-083 · 예선 질문 5문항 제출용 TXT 최종 수정
+
+**요청**
+
+- 현재까지 작업한 내용을 바탕으로 문항 답변 제출용 TXT를 최종 수정합니다.
+
+**수행 작업**
+
+- 루트의 `submission-form-answers.txt`를 최종 제출폼 복사용 답변으로 갱신했습니다.
+- 추적 가능한 문서 원본인 `docs/submission-questions.md`도 같은 내용으로 갱신했습니다.
+- 최종 구현 상태를 반영해 다음 내용을 보강했습니다.
+  - 최종 `submission.zip` 18개 파일 구조
+  - 빈 `assets/`와 `.gitkeep` 정리 완료
+  - Codex marketplace 설치·새 비대화 세션 인식 확인
+  - 실제 운영 로그가 아니라 합성·익명화 번들 기반 검증이라는 한계
+  - case-001, case-002, P4-18 benchmark, pytest 68개, ZIP 내부 검증 결과
+- 각 문항 답변이 제출폼 글자 수 제한 안에 들어오는지 확인했습니다.
+
+**변경 파일**
+
+- 수정: `submission-form-answers.txt`
+- 수정: `docs/submission-questions.md`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `submission-form-answers.txt` UTF-8 읽기 성공
+- replacement character 없음
+- TODO/TBD/FIXME 없음
+- 문항 블록 5개 확인
+- 글자 수 확인
+  - 문항 1: 429자 / 제한 800자
+  - 문항 2: 368자 / 제한 800자
+  - 문항 2 출처 URL: 별도 220자
+  - 문항 3: 632자 / 제한 1000자
+  - 문항 4: 432자 / 제한 800자
+  - 문항 5: 597자 / 제한 800자
+
+**트러블슈팅**
+
+- PowerShell 파이프에서 한글 정규식 리터럴이 깨지는 문제를 피하기 위해 Python 검사 스크립트에서 `chr()` 기반으로 `문항`, `출처 URL` 기준 문자열을 생성했습니다. 기존 T-027의 재발 방지 방식을 적용했습니다.
+
+**판단 근거**
+
+- 제출폼에는 간결한 답변이 필요하므로 README 수준의 상세 절차를 모두 복사하지 않고, 핵심 사용 상황·문제 선택 이유·동작 기준·AI 활용·검증 근거만 제한 글자 수 안에 압축했습니다.
+- `submission-form-answers.txt`는 `.gitignore`에 포함된 로컬 제출폼 복사용 파일이므로 GitHub에는 올리지 않고, 같은 내용을 `docs/submission-questions.md`에 추적 문서로 남깁니다.
+- 중요한 새 아키텍처·데이터·보안 결정은 없어 Decisionlog에는 추가하지 않았습니다.
+
+**결과**
+
+- 제출폼에 복사할 최종 TXT 답변이 갱신됐습니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-083 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
