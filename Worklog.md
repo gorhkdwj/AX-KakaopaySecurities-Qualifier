@@ -3017,3 +3017,53 @@
 - 최종 답변에서 `out/` 전체는 로컬 유지, 해설·해석 가이드 Markdown은 Git 추적 문서로 보강하는 방향을 권장합니다.
 - 중요한 새 결정은 D-036 범위에 포함되므로 Decisionlog는 추가하지 않았습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-068 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
+
+### W-069 · 수동 테스트 문서의 첫 사용자용 해설·해석 가이드 보강
+
+**요청**
+
+- 플러그인을 처음 보는 사람도 직관적으로 바로 사용할 수 있을 만큼 case-001, case-002 테스트 내용을 충분히 인용하고 쉽고 풍부한 해설을 더해 각 문서를 보강합니다.
+
+**수행 작업**
+
+- `docs/manual-test-reports/README.md`에 첫 사용자용 5분 사용 흐름, 출력 파일 읽는 순서, 핵심 용어 설명, `out/` 제외·docs 포함 기준을 추가했습니다.
+- `case-001-market-open-watchlist-review.md`에 작은 예제의 상황 설명, 대표 출력 인용, 60초 bucket 해석, 플러그인 사용자의 조치 방향, 핵심 가치 설명을 추가했습니다.
+- `case-002-large-scenario.md`에 대규모 현실형 테스트의 시간대별 결과, 대표 출력 인용, 경계값 해석, 원인 가설·추가 확인 필요 설명, 실무 조치 순서를 추가했습니다.
+- `human-review-template.md`에 새 수동 테스트 작성 시 반드시 채울 첫 사용자 요약, 대표 출력 인용, 결과 해석과 권장 조치 섹션을 추가했습니다.
+- 임시 한글 섹션 검사 중 발생한 PowerShell/Python 인코딩 문제를 T-023으로 기록했습니다.
+
+**변경 파일**
+
+- 수정: `docs/manual-test-reports/README.md`
+- 수정: `docs/manual-test-reports/case-001-market-open-watchlist-review.md`
+- 수정: `docs/manual-test-reports/case-002-large-scenario.md`
+- 수정: `docs/manual-test-reports/human-review-template.md`
+- 수정: `Troubleshootinglog.md`
+- 수정: `Worklog.md`
+
+**검증**
+
+- `Select-String`으로 README, case-001, case-002, template의 새 핵심 섹션 존재를 확인했습니다.
+- `git diff --check`
+  - exit code 0
+  - CRLF 변환 안내만 표시됐습니다.
+- `python .\tools\preflight_check.py --quiet`
+  - `SUMMARY ok=5 warn=0 error=0`
+- `git diff --stat`
+  - 수동 테스트 문서 4개와 Troubleshootinglog 변경을 확인했습니다.
+
+**트러블슈팅**
+
+- T-023: PowerShell here-string 안의 한글 검사 문자열이 임시 Python 스크립트에서 깨져 섹션 검사에 실패했습니다. 문서 자체 오류가 아니라 검사 방식 문제였고, `Select-String`으로 재검증해 통과했습니다.
+
+**판단 근거**
+
+- `out/` 전체를 Git에 올리는 대신, 사람이 바로 이해할 수 있는 Markdown 해설 문서를 강화하는 것이 저장소 크기, 보안, 포트폴리오 가독성 측면에서 더 적절합니다.
+- case-001은 입문용 작은 예제, case-002는 대규모 현실형 검증 예제로 역할을 나누어 설명해야 처음 보는 사람이 흐름을 따라가기 쉽습니다.
+- 대표 출력은 원본 로그 전문이 아니라 검증된 요약 수치와 시간대별 bucket 값만 인용해 안전성과 가독성을 함께 확보했습니다.
+
+**결과**
+
+- 수동 테스트 문서들이 첫 사용자용 사용 예제와 해석 가이드 역할을 하도록 보강됐습니다.
+- 중요한 새 결정은 기존 D-036 범위에 포함되므로 Decisionlog는 추가하지 않았습니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-069 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.

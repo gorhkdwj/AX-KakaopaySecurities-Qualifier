@@ -717,3 +717,30 @@
 
 - Windows PowerShell에서 inline Python을 실행할 때는 `@' ... '@ | python -`를 사용합니다.
 - Bash heredoc 문법은 이 프로젝트의 기본 셸 명령 예시로 사용하지 않습니다.
+
+### T-023 · PowerShell here-string 안의 한글 검사 문자열이 임시 Python 스크립트에서 깨진 문제
+
+**발생 단계**
+
+- Phase/P4 단계: Phase 4 / 수동 테스트 문서 해석 가이드 보강
+- 관련 W-ID: W-069
+
+**증상**
+
+- `docs/manual-test-reports/` 문서 보강 후 섹션 존재 여부를 Python 임시 스크립트로 검사했습니다.
+- 파일 자체에는 한글 섹션 제목이 정상적으로 존재했지만, 검사 스크립트 안의 한글 문자열이 `??` 형태로 깨져 `MISSING` 오류가 발생했습니다.
+
+**확인한 원인**
+
+- PowerShell here-string으로 전달한 임시 Python 코드 안의 한글 리터럴이 실행 과정에서 콘솔 인코딩 영향을 받았습니다.
+- 이는 문서 파일의 UTF-8 내용 문제가 아니라, 임시 검사 명령 작성 방식의 문제였습니다.
+
+**조치**
+
+- 같은 섹션 존재 검사를 PowerShell `Select-String -LiteralPath ... -Pattern ...` 방식으로 재실행했습니다.
+- `README.md`, case-001, case-002, `human-review-template.md`의 새 핵심 섹션이 모두 존재함을 확인했습니다.
+
+**재발 방지·후속 조치**
+
+- Windows PowerShell에서 한글 섹션명 존재 여부를 검사할 때는 간단한 경우 `Select-String`을 우선 사용합니다.
+- Python 임시 스크립트에 한글 리터럴을 넣어야 한다면 `python -X utf8` 또는 코드포인트·ASCII 기반 검사를 사용합니다.
