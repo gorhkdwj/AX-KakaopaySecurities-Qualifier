@@ -2605,3 +2605,87 @@
 - 중요한 새 결정은 아직 사용자가 선택하지 않았으므로 Decisionlog 항목은 만들지 않았습니다.
 - Notion 동기화 완료: Phase 4 페이지에 W-060 요약을 추가했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`입니다.
 - Git 동기화 완료: W-060 기록을 커밋 `c15c143f5ba826080aea801f48881a22ec3643e0`로 원격 `origin/main`에 push했습니다. 이 동기화 완료 문구도 별도 기록 커밋으로 원격에 반영합니다.
+
+### W-061 · 수동 테스트 파일 구조, 합성 데이터, 실행 결과와 휴먼 리뷰 보고서 구축
+
+**요청**
+
+- 사용자가 직접 더미데이터로 OpenBell Guard를 테스트하고 결과를 검토할 수 있도록 테스트 및 휴먼 리뷰 로직을 반영한 파일 구조를 구축합니다.
+- 테스트를 위한 합성데이터와 실제 테스트 결과, 사람이 검토할 Markdown 보고서를 모두 남깁니다.
+
+**수행 작업**
+
+- `engineering:testing-strategy` 스킬을 확인해 수동 테스트 구조를 “재실행 가능한 로컬 통합 테스트 + 사람이 읽는 검토 보고서”로 정했습니다.
+- `out/manual-tests/case-001-market-open-watchlist-review/bundle/`에 합성 입력 번들을 생성했습니다.
+- `run_openbell.py`를 실제 실행해 `out/manual-tests/case-001-market-open-watchlist-review/result/`에 분석 결과를 생성했습니다.
+- `validate_bundle.py`로 결과 구조, 근거 참조, 보고서 claim marker, 민감정보 잔존 여부를 검증했습니다.
+- `docs/manual-test-reports/`에 수동 테스트 안내, 휴먼 리뷰 템플릿, case-001 검토 보고서를 추가했습니다.
+- `docs/README.md`에 수동 테스트·휴먼 리뷰 문서 링크와 관리 원칙을 추가했습니다.
+- 결과 폴더를 대상으로 합성 토큰·이메일·전화번호·계좌번호 원문 잔존 검색을 수행했습니다.
+
+**변경 파일**
+
+- 추가: `docs/manual-test-reports/README.md`
+- 추가: `docs/manual-test-reports/human-review-template.md`
+- 추가: `docs/manual-test-reports/case-001-market-open-watchlist-review.md`
+- 추가: `requirements-dev.txt`
+- 수정: `docs/README.md`
+- 추가: `out/manual-tests/case-001-market-open-watchlist-review/bundle/incident.json`
+- 추가: `out/manual-tests/case-001-market-open-watchlist-review/bundle/service-map.json`
+- 추가: `out/manual-tests/case-001-market-open-watchlist-review/bundle/logs.jsonl`
+- 추가: `out/manual-tests/case-001-market-open-watchlist-review/bundle/metrics.csv`
+- 생성: `out/manual-tests/case-001-market-open-watchlist-review/result/` 하위 분석 결과 파일
+- 수정: `Worklog.md`
+- 수정: `Decisionlog.md`, `Troubleshootinglog.md`
+
+**검증**
+
+- `python .\src\skills\openbell-guard\scripts\run_openbell.py --bundle .\out\manual-tests\case-001-market-open-watchlist-review\bundle --output .\out\manual-tests\case-001-market-open-watchlist-review\result`
+  - exit code 0
+  - `run_status=report_validated`
+  - accepted records: `logs.jsonl` 54건, `metrics.csv` 15건, total 69건
+  - `market_data`, `watchlist_info`는 `outage_detected`, `order_execution`은 `healthy`로 판정
+- `python .\src\skills\openbell-guard\scripts\validate_bundle.py --output .\out\manual-tests\case-001-market-open-watchlist-review\result`
+  - exit code 0
+  - `status=passed`
+  - `analysis_schema`, `confirmed_fact_evidence`, `evidence_references`, `report_claim_refs`, `secret_residue` 모두 통과
+- `rg -n "syntheticBearerToken123|syntheticKeyForMasking|analyst@example.com|010-1234-5678|123-456-789012" out\manual-tests\case-001-market-open-watchlist-review\result`
+  - exit code 1
+  - 결과 폴더 내 검색 히트 없음
+- `python .\tools\preflight_check.py`
+  - `SUMMARY ok=5 warn=0 error=0`
+- `python -m pytest src\tests`
+  - 1차 시도 실패: 현재 Python 환경에 `pytest`가 설치되어 있지 않아 `No module named pytest`가 발생했습니다.
+  - 제품 코드 실패가 아니라 로컬 테스트 의존성 부재이므로 T-019로 기록했습니다.
+- 사용자 요청 후 `python -m pip install pytest`
+  - exit code 0
+  - `pytest==9.1.1`, `pluggy==1.6.0`, `iniconfig==2.3.0` 설치 완료
+- `python -m pytest src\tests`
+  - exit code 0
+  - 1차 재실행: 68 passed in 13.23s
+  - 최종 재검증: 68 passed in 13.52s
+  - 커밋 전 재검증: 68 passed in 13.67s
+  - T-020 수정 후 재검증: 68 passed in 13.15s
+- `git diff --check`
+  - 1차 시도 실패: `docs/README.md`의 새 목록 줄에 Markdown 줄바꿈용 trailing whitespace가 있었습니다.
+  - 조치: 해당 공백을 제거했습니다.
+  - 재실행 결과 exit code 0이며 CRLF 변환 안내만 표시됐습니다.
+  - T-020으로 기록했습니다.
+
+**판단 근거**
+
+- `src/`는 최종 제출 플러그인 루트이므로 사용자의 1회성 직접 실행 결과를 넣지 않는 편이 안전합니다.
+- `out/`은 이미 `.gitignore` 대상이므로 큰 실행 산출물과 개인별 테스트 결과를 로컬에 남기기 적합합니다.
+- 사람이 제출 전 검토해야 하는 요약 보고서와 체크리스트는 `docs/manual-test-reports/`에 두면 포트폴리오·리뷰 용도로 추적하기 쉽습니다.
+- 자동 검증이 통과해도 고객 공지, 법적 판단, 보상, 운영 조치는 사람이 검토해야 하므로 휴먼 리뷰 체크리스트를 별도로 문서화했습니다.
+
+**결과**
+
+- 수동 테스트용 합성 입력과 실행 결과가 로컬 `out/manual-tests/case-001-market-open-watchlist-review/`에 남았습니다.
+- 휴먼 리뷰 보고서와 템플릿이 `docs/manual-test-reports/`에 추가되었습니다.
+- dev 검증 의존성 재현을 위해 `requirements-dev.txt`를 추가했습니다.
+- `out/`은 Git 추적 대상이 아니므로 원격 저장소에는 올라가지 않습니다. 원격에도 보존해야 하는 대표 케이스는 이후 `src/tests/fixtures/` 또는 별도 압축 아카이브로 승격해야 합니다.
+- 중요한 구조 결정이 있으므로 D-036을 추가했습니다.
+- pytest 의존성 부재는 T-019로 기록했고, 사용자 요청에 따라 설치 후 전체 회귀 테스트 통과까지 확인했습니다.
+- 커밋 전 `git diff --check`의 trailing whitespace 실패는 T-020으로 기록하고 수정했습니다.
+- Notion 동기화 완료: Phase 4 페이지에 W-061 요약을 추가했고, D-036 결정 페이지를 생성했습니다. Phase 4 URL은 `https://app.notion.com/p/38d05ea68bfc81e28c0ec316d0c0326e`이며 D-036 URL은 `https://app.notion.com/p/38f05ea68bfc81f58371e5495143ad2e`입니다.

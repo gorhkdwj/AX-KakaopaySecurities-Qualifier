@@ -596,3 +596,67 @@
 - M-016은 개별 deterministic pipeline run의 중앙값이고, 전체 benchmark 명령 wall time이 아님을 보고서와 최종 설명에서 구분합니다.
 - 대규모 입력으로 새 산출물을 추가할 때는 결과 파일 크기도 검증 항목에 포함합니다.
 - `tracemalloc` 결과는 Python 추적 메모리일 뿐 전체 프로세스 메모리가 아니므로 과장하지 않습니다.
+
+### T-019 · 전체 pytest 회귀 테스트 실행 시 `pytest` 미설치로 실패한 문제
+
+**발생 단계**
+
+- Phase/P4 단계: Phase 4 / 수동 테스트·휴먼 리뷰 산출물 구축
+- 관련 W-ID: W-061
+
+**증상**
+
+- `python -m pytest src\tests` 실행 시 다음 오류가 발생했습니다.
+- `C:\Users\gorhk\MiniConda3\python.exe: No module named pytest`
+
+**확인한 원인**
+
+- 현재 Python 환경에는 `pytest`가 설치되어 있지 않습니다.
+- 이번 수동 테스트 케이스의 `run_openbell.py`, `validate_bundle.py`, `tools/preflight_check.py` 실행은 정상 통과했습니다.
+- 따라서 이번 실패는 제품 코드의 회귀 실패가 아니라 전체 테스트 러너 의존성 부재입니다.
+
+**초기 조치**
+
+- 이번 작업 범위에서는 추가 패키지를 임의 설치하지 않고, 실행 가능한 검증을 모두 수행했습니다.
+- CLI 실행 결과, 출력 validator, 민감정보 잔존 검색, preflight 검사를 통해 이번 변경 범위를 검증했습니다.
+- pytest 미설치 사실을 W-061과 본 T-019에 기록했습니다.
+
+**추가 조치**
+
+- 사용자가 `pytest` 설치를 명시적으로 요청해 `python -m pip install pytest`를 실행했습니다.
+- `pytest==9.1.1`, `pluggy==1.6.0`, `iniconfig==2.3.0` 설치를 확인했습니다.
+- 같은 환경에서 `python -m pytest src\tests`를 재실행해 68개 테스트가 모두 통과했습니다.
+- 다음 환경 재현을 위해 루트 `requirements-dev.txt`에 `pytest==9.1.1`을 기록했습니다.
+
+**재발 방지·후속 조치**
+
+- 전체 회귀 테스트가 필요할 때는 먼저 `python -m pytest --version` 또는 `python -c "import pytest"`로 의존성 존재를 확인합니다.
+- 새 환경에서는 `python -m pip install -r requirements-dev.txt`로 검증 의존성을 먼저 설치합니다.
+- 제출용 런타임 의존성과 개발 검증 의존성은 분리해 설명합니다.
+
+### T-020 · docs/README.md 새 목록 줄의 Markdown 줄바꿈 공백이 `git diff --check`에 걸린 문제
+
+**발생 단계**
+
+- Phase/P4 단계: Phase 4 / 수동 테스트·휴먼 리뷰 산출물 구축
+- 관련 W-ID: W-061
+
+**증상**
+
+- 커밋 전 `git diff --check` 실행 시 `docs/README.md`의 새 목록 줄 여러 곳에서 `trailing whitespace` 경고가 발생했고 exit code 1로 종료됐습니다.
+
+**확인한 원인**
+
+- 기존 문서의 목록 작성 스타일을 따라 링크 줄 끝에 Markdown 줄바꿈용 공백 두 칸을 넣었습니다.
+- Git 검사는 변경된 새 줄의 끝 공백을 품질 이슈로 판단했습니다.
+- 문맥상 해당 공백이 없어도 다음 줄 설명은 목록 항목의 설명으로 읽을 수 있어 기능적 필요성이 낮았습니다.
+
+**조치**
+
+- 새로 추가·수정된 `docs/README.md` 목록 줄의 trailing whitespace를 제거했습니다.
+- 이후 `git diff --check`를 다시 실행해 통과 여부를 확인합니다.
+
+**재발 방지·후속 조치**
+
+- 새 Markdown 목록을 추가할 때 줄 끝 공백 두 칸에 의존하지 말고, 가능한 일반 줄바꿈과 들여쓰기로 설명을 연결합니다.
+- 커밋 전 `git diff --check`를 실행해 공백·충돌 marker 문제를 확인합니다.
